@@ -86,6 +86,9 @@ nothing.
 3. VM ID 9000 is free: `qm status 9000` should fail with "does not exist".
 4. The node can reach the internet (Ubuntu's cloud image and archive, `repo.zabbix.com`).
    `make template` installs `libguestfs-tools` on the node if it's missing.
+   On a node without a subscription, switch apt to the `pve-no-subscription`
+   repository first (Node → Updates → Repositories): a fresh install only has
+   the enterprise repository, and `apt-get install` fails on it.
 5. The site's DNS resolves `zabbix-proxy.<its domain>` to the Zabbix proxy
    (or to the Zabbix server, when you don't use proxies). VMs use that DNS and
    domain, which you enter in step 4.
@@ -173,6 +176,10 @@ make vms        # clone, configure, grow the disk, start
 make ansible    # OS baseline + Zabbix agent check (make check = dry-run)
 ```
 
+The inventory only lists VMs with status **Active**. A *Planned* VM is built
+and started by `make vms`, and `make ansible` configures it once you set it
+to Active in NetBox.
+
 `make site` does `vms` and `ansible` in one run. Within a minute or two of
 booting, the VM shows up in Zabbix as `lab-tst01.<domain>` through the
 autoregistration action.
@@ -208,6 +215,7 @@ and [templates.md](templates.md) (test templates, other distros).
 | sops: `no identity matched any of the recipients` | the age key isn't at `~/.config/sops/age/keys.txt`, or its public key isn't in the site's `.sops.yaml` |
 | `make plan` lists `ERROR` lines | a NetBox VM is incomplete (no primary IP, too little memory or disk, a gateway outside its subnet) or its name doesn't match `vms_name_pattern`. Nothing was changed; fix it in NetBox |
 | `make plan` wants to create a VM that already exists | it was built by hand, not from the template: tag it `unmanaged` in NetBox ([operations.md](operations.md#vms-built-by-hand)) |
+| `make plan`: `VM ID … is already used by '…', which is not managed (no 'packetflow' tag)` | an earlier `make vms` was interrupted during the clone, before the tag was set. Delete the half-built VM in Proxmox and run again |
 | `make vms` ends with "no longer wanted by NetBox" | orphans: tagged VMs NetBox doesn't list (any more). Everything else was applied; delete them by hand or fix their status in NetBox |
 | `CERTIFICATE_VERIFY_FAILED` from Proxmox | self-signed node certificate: `make update DATA=pve_validate_certs=false` |
 | Proxmox `403 … Permission check failed` | the named privilege is missing from the user's role; the `vms` README shows how to add it |
