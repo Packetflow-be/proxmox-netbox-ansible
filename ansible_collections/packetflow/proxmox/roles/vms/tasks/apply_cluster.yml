@@ -1,0 +1,16 @@
+---
+# Apply one cluster's plan (vms_p: {cluster, plan}) with that cluster's API token.
+- name: Cluster being applied
+  ansible.builtin.set_fact:
+    vms_c: "{{ vms_p.cluster }}"
+
+- name: Apply the plan
+  module_defaults:
+    group/community.proxmox.proxmox: "{{ vms_api_args }}"
+  block:
+    - name: VMs of {{ vms_c.netbox_cluster }}
+      ansible.builtin.include_tasks: apply.yml
+      loop: "{{ vms_p.plan.vms | selectattr('actions') | list }}"
+      loop_control:
+        loop_var: vms_vm
+        label: "{{ vms_vm.name }}"

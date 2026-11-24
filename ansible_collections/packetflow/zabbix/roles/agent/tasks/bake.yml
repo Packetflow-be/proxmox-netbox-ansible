@@ -1,0 +1,74 @@
+---
+# Template build (called by packetflow.proxmox.template on the node): renders
+# the agent files into zabbix_agent_bake_dir and returns the virt-customize
+# arguments that install and configure the agent inside the image, as
+# zabbix_agent_bake_args. The caller deletes the directory (it holds the PSK).
+- name: Validate settings
+  ansible.builtin.include_tasks: validate.yml
+
+- name: Bake directory
+  ansible.builtin.file:
+    path: "{{ zabbix_agent_bake_dir }}"
+    state: directory
+    mode: "0700"
+
+- name: Zabbix repository key
+  ansible.builtin.get_url:
+    url: "{{ zabbix_agent_repo_key_url }}"
+    dest: "{{ zabbix_agent_bake_dir }}/zabbix.asc"
+    mode: "0644"
+
+- name: Zabbix repository
+  ansible.builtin.template:
+    src: zabbix.sources.j2
+    dest: "{{ zabbix_agent_bake_dir }}/zabbix.sources"
+    mode: "0644"
+
+# Byte-identical to what blockinfile writes, so day-2 runs report ok.
+- name: Config block
+  ansible.builtin.copy:
+    # Double-quoted: YAML turns \n into newlines (a block scalar would not).
+    content: "{{ ([zabbix_agent_block_marker | replace('{mark}', 'BEGIN')] + zabbix_agent_block_lines
+      + [zabbix_agent_block_marker | replace('{mark}', 'END')]) | join('\n') }}\n"
+    dest: "{{ zabbix_agent_bake_dir }}/block"
+    mode: "0600"
+
+- name: PSK
+  ansible.builtin.copy:
+    content: "{{ zabbix_agent_psk }}\n"
+    dest: "{{ zabbix_agent_bake_dir }}/psk"
+    mode: "0600"
+  no_log: true
+
+- name: Script run inside the image
+  ansible.builtin.template:
+    src: bake.sh.j2
+    dest: "{{ zabbix_agent_bake_dir }}/bake.sh"
+    mode: "0700"
+
+# virt-customize applies these in order.
+- name: Arguments for virt-customize
+  ansible.builtin.set_fact:
+    zabbix_agent_bake_args:
+      - --mkdir
+      - "{{ zabbix_agent_keyring | dirname }}"
+      - --upload
+      - "{{ zabbix_agent_bake_dir }}/zabbix.asc:{{ zabbix_agent_keyring }}"
+      - --chmod
+      - "0644:{{ zabbix_agent_keyring }}"
+      - --upload
+      - "{{ zabbix_agent_bake_dir }}/zabbix.sources:/etc/apt/sources.list.d/zabbix.sources"
+      - --chmod
+      - "0644:/etc/apt/sources.list.d/zabbix.sources"
+      - --run-command
+      - apt-get update
+      - --install
+      - zabbix-agent2
+      - --upload
+      - "{{ zabbix_agent_bake_dir }}/block:/tmp/packetflow-zabbix-block"
+      - --upload
+      - "{{ zabbix_agent_bake_dir }}/psk:/tmp/packetflow-zabbix-psk"
+      - --upload
+      - "{{ zabbix_agent_bake_dir }}/bake.sh:/tmp/packetflow-zabbix.sh"
+      - --run-command
+      - sh /tmp/packetflow-zabbix.sh

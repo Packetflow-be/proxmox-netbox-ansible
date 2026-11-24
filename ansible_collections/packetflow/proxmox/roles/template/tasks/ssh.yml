@@ -1,0 +1,41 @@
+---
+# template_method ssh: on the node as root (qm, virt-customize).
+- name: Look at the template ID
+  ansible.builtin.command: qm config {{ template_vmid }}
+  register: template_existing
+  changed_when: false
+  failed_when: false
+
+- name: Classify what is there
+  ansible.builtin.set_fact:
+    template_exists: "{{ template_existing.rc == 0 }}"
+    template_is_ours: >-
+      {{ template_existing.rc == 0
+         and ('name: ' ~ template_name) in template_existing.stdout_lines
+         and 'template: 1' in template_existing.stdout_lines }}
+
+- name: Refuse to replace anything but our template
+  ansible.builtin.fail:
+    msg: >-
+      VM {{ template_vmid }} exists but is not template {{ template_name }}.
+      Nothing was changed. Free the ID or set template_vmid to another one.
+  when: template_exists and not template_is_ours
+
+- name: Template already present
+  ansible.builtin.debug:
+    msg: >-
+      Template {{ template_vmid }} ({{ template_name }}) exists; nothing to do.
+      Rebuild with template_force=true (make template FORCE=1).
+  when: template_exists and not template_force | bool
+
+- name: Build the template
+  when: not template_exists or template_force | bool
+  block:
+    - name: Build
+      ansible.builtin.include_tasks: build.yml
+  always:
+    # The build directory holds the Zabbix PSK.
+    - name: Remove the build directory
+      ansible.builtin.file:
+        path: "{{ template_work_dir }}/build"
+        state: absent

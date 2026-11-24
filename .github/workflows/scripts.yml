@@ -1,0 +1,38 @@
+---
+name: scripts
+
+on:
+  pull_request:
+    paths:
+      - scripts/**
+      - .github/workflows/scripts.yml
+  push:
+    branches: [main]
+    paths:
+      - scripts/**
+      - .github/workflows/scripts.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install tooling
+        run: pip install ruff==0.16.8 pytest==9.1.1 pynetbox==7.8.0 pyyaml==6.0.3 shellcheck-py==0.11.0.1
+      - name: shellcheck
+        run: shellcheck scripts/*.sh
+      - name: ruff
+        run: ruff check scripts/
+      - name: pytest
+        run: pytest -q scripts/tests

@@ -1,0 +1,29 @@
+---
+# ssh: runs on the node as root (qm, virt-customize).
+# api: runs on the controller against the Proxmox API (no image customization).
+- name: Check settings
+  ansible.builtin.assert:
+    that:
+      - template_distro in template_distros
+      - not (template_zabbix_agent | bool) or (template_distros[template_distro].zabbix | default(false) | bool)
+      - (template_test_password | length == 0) or template_name is match('.*-test$')
+      - (template_test_password | length == 0) == (template_test_user | length == 0)
+      - template_method in ['ssh', 'api']
+      - template_method == 'ssh' or not (template_zabbix_agent | bool)
+      - template_method == 'ssh' or template_node | length > 0
+      - template_method == 'ssh' or template_service_user | length == 0
+      - (template_service_user | length == 0) or (template_service_user is match('^[a-z_][a-z0-9_-]{0,31}$')
+          and template_service_ssh_keys | trim | length > 0)
+    fail_msg: >-
+      template_distro must be one of {{ template_distros | list | join(', ') }};
+      the Zabbix agent bake only supports
+      {{ template_distros | dict2items | selectattr('value.zabbix', 'defined') | selectattr('value.zabbix')
+         | map(attribute='key') | join(', ') }} (set template_zabbix_agent=false for others);
+      a test login (template_test_user and template_test_password, both or neither)
+      needs a template_name ending in "-test"; template_method is ssh or api, and
+      api can't customize the image (no Zabbix agent or service user) and needs template_node;
+      template_service_user needs a valid user name (max 32) and template_service_ssh_keys.
+    quiet: true
+
+- name: Build with template_method {{ template_method }}
+  ansible.builtin.include_tasks: "{{ template_method }}.yml"

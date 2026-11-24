@@ -1,0 +1,152 @@
+---
+name: ansible
+
+on:
+  pull_request:
+    paths:
+      - ansible_collections/**
+      - .github/workflows/ansible.yml
+      - .github/scripts/ansible-matrix.py
+      - .github/requirements-ci.txt
+  push:
+    branches: [main]
+    paths:
+      - ansible_collections/**
+      - .github/workflows/ansible.yml
+      - .github/scripts/ansible-matrix.py
+      - .github/requirements-ci.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PY_COLORS: "1"
+  ANSIBLE_FORCE_COLOR: "1"
+  # The repo root is itself a collections path: packetflow.* resolve from the
+  # checkout, third-party collections from the user dir.
+  ANSIBLE_COLLECTIONS_PATH: ${{ github.workspace }}:/home/runner/.ansible/collections
+
+jobs:
+  changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      collections: ${{ steps.matrix.outputs.collections }}
+      roles: ${{ steps.matrix.outputs.roles }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: matrix
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event_name == 'push' && github.event.before || '' }}
+        run: |
+          .github/scripts/ansible-matrix.py "$BASE" | tee -a "$GITHUB_OUTPUT"
+
+  lint:
+    needs: changes
+    if: needs.changes.outputs.collections != '[]'
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        collection: ${{ fromJSON(needs.changes.outputs.collections) }}
+    defaults:
+      run:
+        working-directory: ansible_collections/packetflow/${{ matrix.collection }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: .github/requirements-ci.txt
+      - name: Install tooling
+        run: pip install -r "$GITHUB_WORKSPACE/.github/requirements-ci.txt"
+      - name: Install collection dependencies
+        run: |
+          if [ -f requirements.yml ]; then
+            ansible-galaxy collection install -r requirements.yml -p /home/runner/.ansible/collections
+          fi
+      - name: yamllint
+        run: yamllint --strict .
+      - name: ansible-lint
+        run: ansible-lint
+      - name: Unit tests
+        run: if [ -d tests/unit ]; then pytest -q tests/unit; fi
+      # e.g. proxmox: the vms role against fake Proxmox/NetBox APIs
+      - name: Integration tests
+        run: |
+          shopt -s nullglob
+          for t in tests/integration/*/run.sh; do
+            echo "::group::$t"
+            "$t"
+            echo "::endgroup::"
+          done
+
+  molecule:
+    needs: changes
+    if: needs.changes.outputs.roles != '[]'
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.changes.outputs.roles) }}
+    name: molecule (${{ matrix.collection }}.${{ matrix.role }})
+    env:
+      # NOT the checkout: molecule (ansible-compat) force-installs the collection
+      # under test into ~/.ansible/collections. With the checkout earlier on the
+      # path, that install lands on the source tree and deletes it mid-run.
+      ANSIBLE_COLLECTIONS_PATH: /home/runner/.ansible/collections
+    defaults:
+      run:
+        working-directory: ansible_collections/packetflow/${{ matrix.collection }}/roles/${{ matrix.role }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: .github/requirements-ci.txt
+      - name: Install tooling
+        run: pip install -r "$GITHUB_WORKSPACE/.github/requirements-ci.txt"
+      - name: Install collection dependencies
+        working-directory: ansible_collections/packetflow/${{ matrix.collection }}
+        run: |
+          if [ -f requirements.yml ]; then
+            ansible-galaxy collection install -r requirements.yml -p /home/runner/.ansible/collections
+          fi
+      - name: molecule test
+        run: molecule test
+
+  build:
+    needs: [changes, lint]
+    if: needs.changes.outputs.collections != '[]'
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        collection: ${{ fromJSON(needs.changes.outputs.collections) }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: .github/requirements-ci.txt
+      - name: Install tooling
+        run: pip install -r .github/requirements-ci.txt
+      - name: ansible-galaxy collection build
+        run: |
+          ansible-galaxy collection build \
+            "ansible_collections/packetflow/${{ matrix.collection }}" \
+            --output-path dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: packetflow-${{ matrix.collection }}
+          path: dist/*.tar.gz
+          retention-days: 7

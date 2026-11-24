@@ -1,0 +1,9 @@
+---
+# `make plan` / `make vms`: makes the Proxmox VMs match NetBox (tenant and
+# cluster in group_vars/all/main.yml). Plan first, then clone/configure/
+# resize/start/stop. Orphans are reported, never deleted.
+- name: VMs from NetBox
+  hosts: localhost
+  gather_facts: false
+  roles:
+    - packetflow.proxmox.vms

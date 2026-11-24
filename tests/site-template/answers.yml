@@ -1,0 +1,25 @@
+# Sample answers for the site template: used by CI (site-template.yml) and for
+# local testing.
+site_slug: lab
+site_name: Lab
+netbox_url: https://netbox.example
+netbox_validate_certs: false
+netbox_tenant_slug: lab
+netbox_cluster: lab-pve
+pve_host: pve.lab.example
+pve_validate_certs: false
+pve_template_vm_id: 9000
+pve_datastore: local-lvm
+default_node: pve
+vm_bridge: vmbr0
+default_vlan: null
+default_gateway: 192.168.10.1
+dns_servers: [192.168.10.2, 192.168.10.3]
+dns_domain: lab.example
+# Two keys, one RSA-sized (longer than a line may be): the rendered repo must
+# still pass its own yamllint.
+ssh_public_keys:
+  - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleOnlyExampleOnlyExampleOnly ci@example
+  - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnlyExampleOnly= rsa@example
+age_recipients: age1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqs3290gq
+collections_ref: v0.5.11

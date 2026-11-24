@@ -1,0 +1,134 @@
+# Copier template for a site repo (site-<slug>): the data of one site, with
+# the collections of this repo pinned at a tag. The template is site-template/.
+#   copier copy gh:Packetflow-be/proxmox-netbox-ansible site-<slug>
+#   cd site-<slug> && make update        # later, to pull template changes
+_min_copier_version: "9.0.0"
+_subdirectory: site-template
+_answers_file: .copier-answers.yml
+
+site_slug:
+  type: str
+  help: Site slug (lowercase, digits, underscores). Used for the repo name and the Proxmox token ID.
+  validator: >-
+    {% if not (site_slug | regex_search('^[a-z0-9_]+$')) %}
+    lowercase letters, digits and underscores only (it ends up in Ansible group names)
+    {% endif %}
+
+site_name:
+  type: str
+  help: Site display name
+  default: "{{ site_slug | replace('_', ' ') | title }}"
+
+netbox_url:
+  type: str
+  help: NetBox base URL
+  default: https://netbox.internal.example.com
+  validator: "{% if not netbox_url.startswith('https://') and not netbox_url.startswith('http://') %}must start with https://{% endif %}"
+
+netbox_validate_certs:
+  type: bool
+  help: Verify NetBox's TLS certificate? No while it has a self-signed one (NETBOX_VALIDATE_CERTS)
+  default: true
+
+netbox_tenant_slug:
+  type: str
+  help: NetBox tenant slug holding this site's VMs (and the Proxmox node)
+  default: "{{ site_slug }}"
+  validator: >-
+    {% if not (netbox_tenant_slug | regex_search('^[a-z0-9_]+$')) %}
+    lowercase letters, digits and underscores only
+    {% endif %}
+
+netbox_cluster:
+  type: str
+  help: NetBox cluster name of this site's Proxmox node(s). make seed creates <tenant>-pve
+  default: "{{ netbox_tenant_slug }}-pve"
+  validator: "{% if ' ' in netbox_cluster %}no spaces{% endif %}"
+
+pve_host:
+  type: str
+  help: Proxmox API host, name or IP without https:// or port (PROXMOX_HOST)
+  placeholder: pve.example.lan
+  validator: "{% if not (pve_host | regex_search('^[A-Za-z0-9.-]+$')) %}a host name or IPv4 address only{% endif %}"
+
+pve_validate_certs:
+  type: bool
+  help: Verify the node's TLS certificate? No for Proxmox's default self-signed one
+  default: true
+
+pve_template_vm_id:
+  type: int
+  help: VM ID of the template (make template builds it, then VMs are cloned from it)
+  default: 9000
+
+pve_datastore:
+  type: str
+  help: Datastore for VM disks and cloud-init drives
+  default: local-lvm
+
+default_node:
+  type: str
+  help: Proxmox node name (as Proxmox shows it) for VMs without a NetBox device; the template is built here
+
+vm_bridge:
+  type: str
+  help: Proxmox bridge for VM NICs
+  default: vmbr0
+
+default_vlan:
+  type: yaml
+  help: VLAN tag when a VM's NetBox interface has no untagged VLAN (and no vlan_id custom field); null = untagged
+  default: null
+  validator: >-
+    {% if default_vlan is not none and not (default_vlan is number and 1 <= default_vlan <= 4094) %}
+    null or a VLAN ID between 1 and 4094
+    {% endif %}
+
+default_gateway:
+  type: str
+  help: IPv4 gateway when there's no per-VLAN gateway in vlan_gateways
+  validator: "{% if not (default_gateway | regex_search('^[0-9]{1,3}(\\.[0-9]{1,3}){3}$')) %}an IPv4 address without prefix{% endif %}"
+
+dns_servers:
+  type: yaml
+  help: The site's DNS servers (YAML list). Must resolve zabbix-proxy in dns_domain; public resolvers can't
+  validator: "{% if dns_servers is string or dns_servers is not iterable or dns_servers | length == 0 %}a YAML list, e.g. [10.0.0.1, 10.0.0.2]{% endif %}"
+
+dns_domain:
+  type: str
+  help: The site's DNS domain, used as search domain; zabbix-proxy.<domain> must resolve
+  validator: "{% if not (dns_domain | regex_search('^[A-Za-z0-9.-]+$')) %}a domain name, e.g. example.lan{% endif %}"
+
+ssh_public_keys:
+  type: yaml
+  help: SSH public keys for the cloud-init user 'ansible' (YAML list; at least one)
+  # No default: Copier validates defaults too, and an empty list would fail
+  # the validator before the question is even asked.
+  placeholder: '["ssh-ed25519 AAAA… you@laptop"]'
+  validator: "{% if ssh_public_keys is string or ssh_public_keys | length == 0 %}at least one key, as a YAML list{% endif %}"
+
+age_recipients:
+  type: str
+  help: age public key(s) that can decrypt this repo's secrets, comma-separated
+  validator: "{% if not age_recipients.startswith('age1') %}age public keys start with age1{% endif %}"
+
+collections_ref:
+  type: str
+  help: Tag (or branch) of this repo to install the Ansible collections from
+  default: v0.5.11
+
+_message_after_copy: |
+  Created {{ _copier_conf.dst_path }} for {{ site_name }}.
+
+  Next steps (also in its README.md, "Setup"; walkthrough: docs/setup.md in
+  proxmox-netbox-ansible). If you ran copier yourself instead of `make site`, first:
+  git init -b main && git add -A && git commit -m "Initial site from site-template"
+
+    cd {{ _copier_conf.dst_path }}
+    make secrets        # Proxmox + NetBox tokens, then the Zabbix PSK (two editors)
+    git add -A && git commit -m "Add encrypted secrets"      # encrypted for {{ age_recipients }}
+    make publish        # optional: private GitHub repo <your account>/site-{{ site_slug }} (REPO=owner/name for another)
+    make deps           # Ansible collections -> .collections/ (every other target needs them)
+    make seed           # NetBox objects: dry-run. Missing ones: make seed APPLY=1 [NODE_IP=<ip/prefix>]
+    make template       # VM template {{ pve_template_vm_id }} on {{ default_node }}, root over SSH, a few minutes
+    make plan           # what make vms would change in Proxmox (changes nothing)

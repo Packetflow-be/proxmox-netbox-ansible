@@ -1,0 +1,168 @@
+---
+# template_method api: on the controller, through the Proxmox API only. Proxmox
+# downloads the image into template_import_storage (checksum verified), imports
+# it as the template's disk and sets cloud-init. Nothing inside the image
+# changes: no guest agent, no Zabbix agent, SSH password login stays as the
+# distro ships it (off on Ubuntu, console login works).
+- name: Look at the template ID
+  ansible.builtin.uri:
+    url: "{{ template_api_url }}/nodes/{{ template_node }}/qemu/{{ template_vmid }}/config"
+    headers: "{{ template_api_headers }}"
+    validate_certs: "{{ template_api_validate_certs }}"
+    status_code: [200, 500]
+  register: template_existing
+
+- name: Classify what is there
+  ansible.builtin.set_fact:
+    template_exists: "{{ template_existing.status == 200 }}"
+    template_is_ours: >-
+      {{ template_existing.status == 200
+         and template_existing.json.data.name | default('') == template_name
+         and template_existing.json.data.template | default(0) | int == 1 }}
+
+- name: Refuse to replace anything but our template
+  ansible.builtin.fail:
+    msg: >-
+      VM {{ template_vmid }} exists but is not template {{ template_name }}.
+      Nothing was changed. Free the ID or set template_vmid to another one.
+  when: template_exists and not template_is_ours
+
+- name: Template already present
+  ansible.builtin.debug:
+    msg: >-
+      Template {{ template_vmid }} ({{ template_name }}) exists; nothing to do.
+      Rebuild with template_force=true (FORCE=1).
+  when: template_exists and not template_force | bool
+
+- name: Build the template
+  when: not template_exists or template_force | bool
+  block:
+    - name: Checksums published next to the image
+      ansible.builtin.uri:
+        url: "{{ template_checksum_url }}"
+        return_content: true
+      register: template_sums
+
+    # "<hash> *<file>" (Ubuntu) or "<hash>  <file>" (Debian).
+    - name: Checksum of this image
+      ansible.builtin.set_fact:
+        template_image_checksum: >-
+          {{ template_sums.content.splitlines()
+             | select('search', '[ *]' ~ (template_image_url | basename | regex_escape) ~ '$')
+             | map('split') | map('first') | first | default('') }}
+
+    - name: Checksum found
+      ansible.builtin.assert:
+        that: template_image_checksum | length > 0
+        fail_msg: "{{ template_image_url | basename }} is not listed in {{ template_checksum_url }}"
+        quiet: true
+
+    # One file per image version (checksum in the name): a rebuild after the
+    # vendor's refresh downloads the new image, an unchanged one is reused.
+    - name: Name of the image in the import storage
+      ansible.builtin.set_fact:
+        template_import_file: >-
+          {{ (template_image_url | basename | splitext | first) ~ '-' ~ template_image_checksum[:12] ~ '.qcow2' }}
+
+    - name: Images already in the import storage
+      ansible.builtin.uri:
+        url: "{{ template_api_url }}/nodes/{{ template_node }}/storage/{{ template_import_storage }}/content?content=import"
+        headers: "{{ template_api_headers }}"
+        validate_certs: "{{ template_api_validate_certs }}"
+      register: template_imports
+
+    - name: Download the image on the node (checksum verified by Proxmox)
+      ansible.builtin.uri:
+        url: "{{ template_api_url }}/nodes/{{ template_node }}/storage/{{ template_import_storage }}/download-url"
+        method: POST
+        headers: "{{ template_api_headers }}"
+        validate_certs: "{{ template_api_validate_certs }}"
+        body_format: json
+        body:
+          content: import
+          filename: "{{ template_import_file }}"
+          url: "{{ template_image_url }}"
+          checksum: "{{ template_image_checksum }}"
+          checksum-algorithm: "{{ template_checksum_algorithm }}"
+          verify-certificates: 1
+      register: template_download
+      when: >-
+        (template_import_storage ~ ':import/' ~ template_import_file)
+        not in (template_imports.json.data | map(attribute='volid'))
+      changed_when: true
+
+    - name: Wait for the download
+      ansible.builtin.include_tasks: api_wait.yml
+      vars:
+        template_upid: "{{ template_download.json.data }}"
+      when: template_download is not skipped
+
+    - name: Remove the old template
+      ansible.builtin.uri:
+        url: "{{ template_api_url }}/nodes/{{ template_node }}/qemu/{{ template_vmid }}?purge=1"
+        method: DELETE
+        headers: "{{ template_api_headers }}"
+        validate_certs: "{{ template_api_validate_certs }}"
+      register: template_destroy
+      when: template_exists
+      changed_when: true
+
+    - name: Wait for the removal
+      ansible.builtin.include_tasks: api_wait.yml
+      vars:
+        template_upid: "{{ template_destroy.json.data }}"
+      when: template_exists
+
+    - name: Create the template VM from the image
+      ansible.builtin.uri:
+        url: "{{ template_api_url }}/nodes/{{ template_node }}/qemu"
+        method: POST
+        headers: "{{ template_api_headers }}"
+        validate_certs: "{{ template_api_validate_certs }}"
+        body_format: json
+        body: >-
+          {{ {
+               'vmid': template_vmid | int,
+               'name': template_name,
+               'description': template_description,
+               'tags': 'template;' ~ template_distro,
+               'ostype': 'l26',
+               'cpu': 'x86-64-v2-AES',
+               'cores': 2,
+               'memory': '2048',
+               'scsihw': 'virtio-scsi-single',
+               'scsi0': template_storage ~ ':0,import-from=' ~ template_import_storage ~ ':import/'
+                        ~ template_import_file ~ ',discard=on,iothread=1,ssd=1',
+               'ide2': template_storage ~ ':cloudinit',
+               'boot': 'order=scsi0',
+               'net0': 'virtio,bridge=' ~ template_bridge,
+               'serial0': 'socket',
+               'vga': 'serial0',
+               'agent': 'enabled=0',
+             } | combine({'ciuser': template_test_user, 'cipassword': template_test_password}
+                         if template_test_password | length > 0 else {})
+               | combine({'sshkeys': template_test_ssh_keys | trim | urlencode | replace('/', '%2F')}
+                         if template_test_ssh_keys | trim | length > 0 else {}) }}
+      register: template_create
+      no_log: "{{ template_test_password | length > 0 }}"
+      changed_when: true
+
+    - name: Wait for the import
+      ansible.builtin.include_tasks: api_wait.yml
+      vars:
+        template_upid: "{{ template_create.json.data }}"
+
+    - name: Convert to template
+      ansible.builtin.uri:
+        url: "{{ template_api_url }}/nodes/{{ template_node }}/qemu/{{ template_vmid }}/template"
+        method: POST
+        headers: "{{ template_api_headers }}"
+        validate_certs: "{{ template_api_validate_certs }}"
+      register: template_convert
+      changed_when: true
+
+    - name: Wait for the conversion
+      ansible.builtin.include_tasks: api_wait.yml
+      vars:
+        template_upid: "{{ template_convert.json.data }}"
+      when: template_convert.json.data is string and template_convert.json.data is match('UPID:')

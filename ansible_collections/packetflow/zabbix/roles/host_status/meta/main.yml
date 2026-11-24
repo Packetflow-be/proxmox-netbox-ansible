@@ -1,0 +1,13 @@
+---
+galaxy_info:
+  role_name: host_status
+  author: Packetflow
+  description: Disable Zabbix hosts whose NetBox device or VM is out of service, and enable them again
+  company: Packetflow
+  license: Apache-2.0
+  min_ansible_version: "2.16"
+  platforms:
+    - name: GenericLinux
+      versions:
+        - all
+dependencies: []

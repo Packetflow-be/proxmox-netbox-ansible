@@ -1,0 +1,45 @@
+---
+name: site-template
+
+on:
+  pull_request:
+    paths:
+      - copier.yml
+      - site-template/**
+      - tests/site-template/**
+      - .github/workflows/site-template.yml
+  push:
+    branches: [main]
+    paths:
+      - copier.yml
+      - site-template/**
+      - tests/site-template/**
+      - .github/workflows/site-template.yml
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install tooling
+        run: pip install copier==9.18.2 yamllint==1.38.0
+      - name: Render with tests/site-template/answers.yml
+        run: copier copy --defaults --data-file tests/site-template/answers.yml --vcs-ref HEAD . "$RUNNER_TEMP/site"
+      - name: yamllint (generated repo's own .yamllint)
+        working-directory: ${{ runner.temp }}/site
+        run: yamllint --strict .
+      - name: actionlint (generated workflows)
+        run: |
+          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.8/scripts/download-actionlint.bash) 1.7.8
+          ./actionlint "$RUNNER_TEMP"/site/.github/workflows/*.yml
+      - name: make targets parse
+        working-directory: ${{ runner.temp }}/site
+        run: make -n secrets seed template deps plan vms check ansible site zabbix-status update publish

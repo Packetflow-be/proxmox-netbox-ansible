@@ -1,0 +1,15 @@
+# Ansible
+.ansible/
+.cache/
+*.retry
+*.tar.gz
+dist/
+
+# Python
+__pycache__/
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Secrets
+.env

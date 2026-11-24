@@ -1,0 +1,25 @@
+---
+# Services per NetBox role or tag. The inventory (inventory/netbox.yml) turns
+# every role and tag slug into a group, so a play targets a group and NetBox
+# decides which VMs are in it. Add one play per service, with a role of your
+# own or from Galaxy:
+#
+# - name: Webservers
+#   hosts: webserver       # NetBox role `webserver`
+#   become: true
+#   roles:
+#     - your_namespace.your_collection.nginx
+#
+# - name: PostgreSQL
+#   hosts: postgresql      # NetBox tag `postgresql`
+#   become: true
+#   roles:
+#     - your_namespace.your_collection.postgresql
+
+# Zabbix agent on hosts the baseline skips (hand-built VMs tagged `unmanaged`);
+# managed VMs get it in 20-baseline.yml.
+- name: Zabbix agent
+  hosts: zabbix_agent    # NetBox tag `zabbix_agent`
+  become: true
+  roles:
+    - packetflow.zabbix.agent

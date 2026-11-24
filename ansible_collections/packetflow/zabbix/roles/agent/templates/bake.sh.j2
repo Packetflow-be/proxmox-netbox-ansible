@@ -1,0 +1,16 @@
+#!/bin/sh
+# {{ ansible_managed }}
+# Runs inside the template image (virt-customize) after zabbix-agent2 is
+# installed. Makes the same changes as the role's day-2 tasks.
+set -eu
+conf={{ zabbix_agent_config }}
+for key in Server ServerActive Hostname; do
+  grep -q "^$key=" "$conf" || { echo "$conf has no $key= line; the package default changed" >&2; exit 1; }
+done
+{% for edit in zabbix_agent_line_edits %}
+sed -i 's|^{{ edit.key }}=.*|{{ edit.line }}|' "$conf"
+{% endfor %}
+cat /tmp/packetflow-zabbix-block >> "$conf"
+install -o zabbix -g zabbix -m 0400 /tmp/packetflow-zabbix-psk {{ zabbix_agent_psk_file }}
+rm -f /tmp/packetflow-zabbix-block /tmp/packetflow-zabbix-psk "$0"
+systemctl enable zabbix-agent2

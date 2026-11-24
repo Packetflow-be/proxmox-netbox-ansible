@@ -1,0 +1,50 @@
+---
+- name: Check settings
+  ansible.builtin.assert:
+    that:
+      - vms_netbox_tenant | length > 0
+      - vms_netbox_url | length > 0
+      - vms_clusters is sequence and vms_clusters is not string
+      - vms_clusters | map('dict2items') | flatten | map(attribute='key') | difference(vms_cluster_keys) | length == 0
+    fail_msg: >-
+      Set vms_netbox_tenant and NETBOX_URL (or vms_netbox_url). vms_clusters is a
+      list of dicts with keys from: {{ vms_cluster_keys | join(', ') }}.
+    quiet: true
+
+# Plan every cluster first: an error anywhere stops the run before any change.
+- name: Plan per cluster
+  ansible.builtin.include_tasks: plan.yml
+  loop: "{{ vms_clusters or [{}] }}"
+  loop_control:
+    loop_var: vms_cluster
+    index_var: vms_cluster_index
+    label: "{{ vms_cluster.netbox_cluster | default(vms_netbox_cluster) }}"
+
+- name: Stop on plan errors (nothing was changed)
+  ansible.builtin.fail:
+    msg: "{{ vms_plans | map(attribute='plan.errors') | flatten }}"
+  when: vms_plans | map(attribute='plan.errors') | flatten | length > 0
+
+- name: Apply per cluster
+  ansible.builtin.include_tasks: apply_cluster.yml
+  loop: "{{ vms_plans }}"
+  loop_control:
+    loop_var: vms_p
+    label: "{{ vms_p.cluster.netbox_cluster }}"
+  when: not vms_plan_only | bool
+
+# Report only: deleting a VM stays a deliberate, manual act.
+- name: Report orphaned VMs
+  ansible.builtin.fail:
+    msg: >-
+      {{ vms_orphans | length }} Proxmox VM(s) tagged '{{ vms_managed_tag }}' are no
+      longer wanted by NetBox (deleted there, or a status like decommissioning):
+      {{ vms_orphans | map(attribute='vmid') | zip(vms_orphans | map(attribute='name'))
+         | map('join', ' ') | join(', ') }}.
+      Nothing was deleted. Remove them in Proxmox (Options -> Protection off, then
+      Remove), or set them back to active/offline in NetBox.
+  vars:
+    vms_orphans: "{{ vms_plans | map(attribute='plan.orphans') | flatten }}"
+  when:
+    - vms_orphans | length > 0
+    - not vms_plan_only | bool

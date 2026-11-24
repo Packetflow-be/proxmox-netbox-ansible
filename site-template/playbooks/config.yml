@@ -1,0 +1,8 @@
+---
+# Configuration of existing hosts (make check / make ansible); site.yml runs
+# the VM play first.
+- name: OS baseline
+  ansible.builtin.import_playbook: 20-baseline.yml
+
+- name: Services
+  ansible.builtin.import_playbook: 30-services.yml

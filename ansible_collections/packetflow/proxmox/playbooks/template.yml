@@ -1,0 +1,9 @@
+---
+# Build one VM template on a Proxmox node, as root over SSH:
+#   ansible-playbook -i <node>, -u root packetflow.proxmox.template -e template_distro=debian12 ...
+# Site repos run their own playbook (make template); `make test-template` in this repo uses this one.
+- name: VM template
+  hosts: "{{ template_hosts | default('all') }}"
+  gather_facts: false
+  roles:
+    - packetflow.proxmox.template

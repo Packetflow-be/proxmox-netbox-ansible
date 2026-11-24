@@ -1,0 +1,21 @@
+---
+# Shared by the day-2 tasks and the template bake (tasks/bake.yml), so a VM
+# cloned from the template is already in the state the day-2 tasks produce.
+
+# The package's zabbix_agent2.conf sets these three explicitly; they are
+# replaced in place (a second definition would be a config error).
+zabbix_agent_line_edits:
+  - {key: Server, line: "Server={{ zabbix_agent_server }}"}
+  - {key: ServerActive, line: "ServerActive={{ zabbix_agent_server }}"}
+  - {key: Hostname, line: "# Hostname= unset: HostnameItem below names the host"}
+
+# Everything else is appended as one managed block (all commented in the default file).
+zabbix_agent_block_marker: "# {mark} PACKETFLOW MANAGED BLOCK"
+zabbix_agent_block_lines:
+  # Host names are unique across the Zabbix server: the FQDN keeps sites apart.
+  - HostnameItem=system.hostname[fqdn]
+  - "HostMetadata={{ zabbix_agent_host_metadata }}"
+  - TLSConnect=psk
+  - TLSAccept=psk
+  - "TLSPSKIdentity={{ zabbix_agent_psk_identity }}"
+  - "TLSPSKFile={{ zabbix_agent_psk_file }}"

@@ -1,0 +1,8 @@
+---
+profile: production
+# Collections are installed by `make deps` / CI into .collections; don't
+# let ansible-lint install requirements.yml again on its own.
+offline: true
+exclude_paths:
+  - .collections/
+  - .github/

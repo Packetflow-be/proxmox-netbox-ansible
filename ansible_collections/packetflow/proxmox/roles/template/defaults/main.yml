@@ -1,0 +1,99 @@
+---
+# VM templates, built on the node from a distro's cloud image: no installer,
+# no Packer, no VM booted during the build. See docs/templates.md.
+
+# Which entry of template_distros to build. Site VMs are cloned from 9000.
+template_distro: ubuntu2404
+template_vmid: 9000
+template_name: "tpl-{{ template_distro }}"
+template_storage: local-lvm       # disk and cloud-init drive
+# ssh: build on the node as root over SSH, customizing the image offline
+#      (guest agent, Zabbix agent). Site templates use this.
+# api: build through the Proxmox API from the controller: the vendor image as
+#      is (no guest agent, no Zabbix agent). Good for test templates.
+template_method: ssh
+template_bridge: vmbr0
+
+# Cloud images this role knows. "current"/"latest" move with the vendor's
+# rebuilds; point image_url at a dated directory to pin one (the checksum
+# file sits next to the image). zabbix: the Zabbix agent bake supports it;
+# codename: the release name used for the Zabbix apt source.
+# cleanup: last command inside the image (ssh method; default apt-get clean).
+# Add a distro here (or in a site's group_vars) to build it.
+template_distros:
+  ubuntu2404:
+    description: Ubuntu 24.04 LTS (noble)
+    codename: noble
+    image_url: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+    checksum_file: SHA256SUMS
+    checksum_algorithm: sha256
+    zabbix: true
+  ubuntu2604:
+    description: Ubuntu 26.04 LTS (resolute)
+    codename: resolute
+    image_url: https://cloud-images.ubuntu.com/resolute/current/resolute-server-cloudimg-amd64.img
+    checksum_file: SHA256SUMS
+    checksum_algorithm: sha256
+    zabbix: true
+  ubuntu2204:
+    description: Ubuntu 22.04 LTS (jammy)
+    image_url: https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img
+    checksum_file: SHA256SUMS
+    checksum_algorithm: sha256
+    zabbix: false
+  debian12:
+    description: Debian 12 (bookworm)
+    image_url: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2
+    checksum_file: SHA512SUMS
+    checksum_algorithm: sha512
+    zabbix: false
+  debian13:
+    description: Debian 13 (trixie)
+    image_url: https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2
+    checksum_file: SHA512SUMS
+    checksum_algorithm: sha512
+    zabbix: false
+
+template_image_url: "{{ template_distros[template_distro].image_url }}"
+template_checksum_url: "{{ template_image_url | dirname }}/{{ template_distros[template_distro].checksum_file }}"
+template_checksum_algorithm: "{{ template_distros[template_distro].checksum_algorithm }}"
+template_work_dir: /var/tmp/packetflow-template
+# true: delete and rebuild an existing template (only if it IS a template
+# named template_name; anything else at that ID is refused).
+template_force: false
+# Bake zabbix-agent2 in (packetflow.zabbix.agent, tasks_from: bake).
+template_zabbix_agent: true
+# template_method api: node name, import storage (content "import"), and the
+# API token. The token defaults to the PROXMOX_* environment the vms role uses.
+template_node: ""
+template_import_storage: local
+template_api_host: "{{ lookup('ansible.builtin.env', 'PROXMOX_HOST') }}"
+template_api_port: "{{ lookup('ansible.builtin.env', 'PROXMOX_PORT', default='8006') }}"
+template_api_user: "{{ lookup('ansible.builtin.env', 'PROXMOX_USER') }}"
+template_api_token_id: "{{ lookup('ansible.builtin.env', 'PROXMOX_TOKEN_ID') }}"
+template_api_token_secret: "{{ lookup('ansible.builtin.env', 'PROXMOX_TOKEN_SECRET') }}"
+template_api_validate_certs: "{{ lookup('ansible.builtin.env', 'PROXMOX_VALIDATE_CERTS', default='true') | bool }}"
+template_api_timeout: 1200        # seconds per Proxmox task (the download is the slow one)
+# false skips installing libguestfs-tools (the integration test fakes it).
+template_install_tools: true
+
+# Test templates only: a console and SSH password login, set through cloud-init
+# on the template, so every clone inherits it. Refused unless template_name
+# ends in "-test", so it can't end up in a site template.
+template_test_user: ""
+template_test_password: ""
+# SSH public keys for the test user (one per line). Cloud images turn SSH
+# password login off, and template_method api can't change that: keys are
+# the way in over SSH, the password works on the console. Read from
+# template_test_ssh_keys_file (on the controller) when that is set.
+template_test_ssh_keys_file: ""
+template_test_ssh_keys: >-
+  {{ lookup('ansible.builtin.file', template_test_ssh_keys_file) if template_test_ssh_keys_file | length > 0 else '' }}
+
+# A service account baked into the image (ssh method only): exists on every
+# clone next to the cloud-init user, key login only (no password), passwordless
+# sudo. For automation that needs a fixed way in, e.g. automation.
+template_service_user: ""
+template_service_ssh_keys_file: ""       # public key(s), on the controller
+template_service_ssh_keys: >-
+  {{ lookup('ansible.builtin.file', template_service_ssh_keys_file) if template_service_ssh_keys_file | length > 0 else '' }}

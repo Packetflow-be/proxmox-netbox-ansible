@@ -1,0 +1,36 @@
+---
+# ansible-lint. No credentials needed: the collections come from the public
+# Packetflow-be/proxmox-netbox-ansible repo.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ansible:
+    runs-on: ubuntu-24.04
+    env:
+      ANSIBLE_CONFIG: ${{ github.workspace }}/ansible.cfg
+      # Lint must not query NetBox or decrypt secrets.
+      ANSIBLE_INVENTORY: localhost,
+      SOPS_ANSIBLE_AWX_DISABLE_VARS_PLUGIN_TEMPORARILY: "true"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install tooling
+        run: pip install ansible-core==2.19.13 ansible-lint==26.9.0
+      - name: Install collections
+        run: ansible-galaxy collection install -r requirements.yml -p .collections
+      - name: ansible-lint
+        run: ansible-lint site.yml playbooks/

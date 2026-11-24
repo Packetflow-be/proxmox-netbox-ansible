@@ -1,0 +1,73 @@
+---
+# NetBox scope: the VMs of this tenant (slug) in this cluster (name).
+vms_netbox_tenant: ""
+vms_netbox_cluster: ""
+# nb_lookup; the site Makefile exports NETBOX_URL, the token comes from the site's secrets.
+vms_netbox_url: "{{ lookup('ansible.builtin.env', 'NETBOX_URL') }}"
+vms_netbox_token: "{{ lookup('ansible.builtin.env', 'NETBOX_TOKEN') }}"
+vms_netbox_validate_certs: "{{ lookup('ansible.builtin.env', 'NETBOX_VALIDATE_CERTS', default='true') | bool }}"
+
+# Proxmox API. The token comes from <vms_api_env>_USER, _TOKEN_ID and
+# _TOKEN_SECRET in the environment (the site's secrets.sops.yaml).
+vms_api_host: "{{ lookup('ansible.builtin.env', 'PROXMOX_HOST') }}"
+vms_api_port: "{{ lookup('ansible.builtin.env', 'PROXMOX_PORT', default='8006') }}"
+vms_api_env: PROXMOX
+vms_api_validate_certs: "{{ lookup('ansible.builtin.env', 'PROXMOX_VALIDATE_CERTS', default='true') | bool }}"
+
+# Several Proxmox clusters for one site (e.g. its own hardware + a shared
+# cluster). Each entry is one cluster; its keys override the settings
+# of the same name below (netbox_cluster, api_host, api_port, api_env,
+# validate_certs, default_node, template_vmid, datastore, bridge,
+# default_vlan, default_gateway, vlan_gateways, pool, cpu_type, templates).
+# Empty: one cluster, with the settings below.
+#   vms_clusters:
+#     - netbox_cluster: shared-pve
+#       api_host: 192.0.2.10
+#       api_env: PROXMOX_SHARED          # PROXMOX_SHARED_USER / _TOKEN_ID / _TOKEN_SECRET
+#       validate_certs: false
+#       default_node: shared-pve1
+#       pool: acme
+#       vlan_gateways: {"40": 10.0.40.1}
+vms_clusters: []
+
+vms_default_node: ""             # node for NetBox VMs without a device
+vms_template_vmid: 9000          # built by the template role; the default template
+# Template per NetBox platform slug, e.g. {ubuntu-2604: 9001}. A VM whose
+# platform isn't listed here is a plan error; a VM without platform gets
+# vms_template_vmid.
+vms_templates: {}
+# NetBox VMs with this tag get their address by DHCP (ipconfig0 ip=dhcp): no
+# primary IPv4 needed. Record the lease in NetBox afterwards (status dhcp).
+vms_dhcp_tag: dhcp
+vms_datastore: local-lvm         # disks of new clones
+vms_bridge: vmbr0
+# net0 of a VM: the untagged VLAN of its NetBox interface; if that VLAN has
+# the custom field pve_vnet, the NIC goes on that Proxmox VNet (untagged),
+# else on vms_bridge with the VLAN's tag. Without such an interface: custom
+# field vlan_id, else vms_default_vlan (null = untagged).
+vms_default_vlan: null
+vms_default_gateway: null
+vms_vlan_gateways: {}            # {"20": "10.0.20.1"}; wins over vms_default_gateway
+vms_dns_servers: []
+vms_dns_domain: null
+vms_ssh_public_keys: []          # cloud-init user vms_ci_user
+vms_ci_user: ansible
+vms_vmid_offset: 10000           # Proxmox VM ID = offset + NetBox VM ID
+vms_managed_tag: packetflow      # VMs without this tag are never touched
+# Proxmox resource pool of this site's VMs (usually the NetBox tenant slug).
+# Set on shared clusters: new clones go into it, orphans are only looked for
+# in it, and VM IDs in another pool are refused. "" = no pool.
+vms_pool: ""
+# NetBox VMs with this tag are skipped: hand-built VMs that NetBox only documents.
+vms_unmanaged_tag: unmanaged
+# Optional regex every NetBox VM name must match (your naming convention):
+# a name that doesn't is a plan error. "" = no check.
+vms_name_pattern: ""
+vms_cpu_type: x86-64-v2-AES
+vms_protection: true             # Proxmox refuses to delete protected VMs
+vms_onboot: true
+
+# true: show the plan and change nothing (make plan).
+vms_plan_only: false
+vms_clone_timeout: 900
+vms_timeout: 300

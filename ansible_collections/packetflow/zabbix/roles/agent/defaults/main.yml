@@ -1,0 +1,34 @@
+---
+# Zabbix agent 2, active + passive checks against the site's Zabbix proxy (or
+# the server). Release line of the apt source on the host:
+zabbix_agent_version: "7.0"                   # 7.0 LTS agents work with 7.x proxies and servers
+zabbix_agent_server: zabbix-proxy             # resolved through the site's DNS search domain
+zabbix_agent_host_metadata: packetflow-linux  # matched by the autoregistration action
+# PSK for agent <-> proxy encryption. Zabbix has one autoregistration PSK per
+# server, so these are the same for every site. Keep them in the site's
+# group_vars/all/secrets.sops.yml.
+zabbix_agent_psk_identity: ""
+zabbix_agent_psk: ""                          # >= 32 hex characters: openssl rand -hex 32
+
+zabbix_agent_config: /etc/zabbix/zabbix_agent2.conf
+zabbix_agent_psk_file: /etc/zabbix/zabbix_agent2.psk
+zabbix_agent_keyring: /etc/apt/keyrings/zabbix.asc
+zabbix_agent_repo_key_url: https://repo.zabbix.com/zabbix-official-repo.key
+# Path per release line: 7.0 and older /zabbix/<v>/<distro>, 7.2 and 7.4
+# /zabbix/<v>/stable/<distro>, 8.0 /zabbix/<v>/release/<distro> (its
+# pre-releases are in .../unstable/<distro>). Set the URL itself for anything else.
+zabbix_agent_repo_url: >-
+  https://repo.zabbix.com/zabbix/{{ zabbix_agent_version }}/{{
+  '' if zabbix_agent_version is version('7.0', '<=')
+  else 'stable/' if zabbix_agent_version is version('8.0', '<')
+  else 'release/' }}{{ zabbix_agent_repo_distro }}
+
+# ubuntu or debian: the host's own (facts); the template role passes the image's.
+zabbix_agent_repo_distro: "{{ ansible_facts['distribution'] | default('Ubuntu', true) | lower }}"
+
+# Release (codename) of the apt source: the host's own (facts) on running VMs; the
+# template role passes the image's codename when it bakes the agent in.
+zabbix_agent_repo_suite: "{{ ansible_facts['distribution_release'] | default('noble', true) }}"
+
+# Template build only (tasks_from: bake): where the files are rendered on the node.
+zabbix_agent_bake_dir: /var/tmp/packetflow-template/zabbix

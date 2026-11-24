@@ -1,0 +1,24 @@
+---
+# Hand-built hosts have Zabbix's zabbix-release package: its zabbix.list names
+# the same repository with another key (apt refuses conflicting Signed-By) and
+# pins the release line it came with.
+- name: No zabbix-release package
+  ansible.builtin.apt:
+    name: zabbix-release
+    state: absent
+    purge: true
+  become: true
+
+- name: Zabbix repository key
+  ansible.builtin.get_url:
+    url: "{{ zabbix_agent_repo_key_url }}"
+    dest: "{{ zabbix_agent_keyring }}"
+    mode: "0644"
+  become: true
+
+- name: Zabbix repository source
+  ansible.builtin.template:
+    src: zabbix.sources.j2
+    dest: /etc/apt/sources.list.d/zabbix.sources
+    mode: "0644"
+  become: true

@@ -1,0 +1,139 @@
+# Site automation. Every target except `secrets` and `deps` runs inside
+#   sops exec-env secrets.sops.yaml '<command>'
+# so credentials exist only in that command's environment, never on disk.
+#
+#   make secrets   create + encrypt secrets from the examples, open the editor
+#   make seed      NetBox objects for this site, dry-run (APPLY=1 writes, NODE_IP=<ip/prefix>)
+#   make template  build VM template {{ pve_template_vm_id }} on {{ default_node }} (FORCE=1 rebuilds it)
+#   make deps      install Ansible collections (./.collections)
+#   make plan      what `make vms` would change in Proxmox (changes nothing)
+#   make vms       make the Proxmox VMs match NetBox
+#   make check     configuration, dry-run (--check --diff)
+#   make ansible   configuration: OS baseline, Zabbix agent, services per NetBox role and tag
+#   make site      vms + ansible
+#   make zabbix-status Zabbix hosts disabled when NetBox says offline/decommissioning (CHECK=1: dry-run)
+#   make publish   optional: private GitHub repo <your account>/site-{{ site_slug }}, or REPO=owner/name (safe to re-run)
+#   make update    pull site-template changes, keeping your answers (commit first)
+#                  DATA="key=value ..." changes answers, e.g. DATA=collections_ref=v0.5.11
+#
+# ARGS passes extra ansible-playbook options, e.g. ARGS="--limit lab-web01 -v".
+# `seed` runs netbox-seed.py from the local proxmox-netbox-ansible checkout
+# (CHECKOUT, default ~/packetflow/proxmox-netbox-ansible). DEV=1 also uses its
+# collections before ./.collections.
+
+SHELL := /bin/bash
+.SHELLFLAGS := -eu -o pipefail -c
+.DEFAULT_GOAL := help
+
+# Site values from the Copier answers. Change them with `make update DATA=key=value`.
+NODE   ?= {{ default_node }}
+TENANT ?= {{ netbox_tenant_slug }}
+CLUSTER ?= {{ netbox_cluster }}
+# GitHub repo for `make publish`: owner/name. Default: your gh account (asked
+# only when publish runs).
+REPO       ?= $(shell gh api user -q .login 2>/dev/null)/site-{{ site_slug }}
+export NETBOX_URL := {{ netbox_url }}
+export NETBOX_VALIDATE_CERTS := {{ 'true' if netbox_validate_certs else 'false' }}
+export PROXMOX_HOST := {{ pve_host }}
+export PROXMOX_VALIDATE_CERTS := {{ 'true' if pve_validate_certs else 'false' }}
+
+CHECKOUT ?= $(HOME)/packetflow/proxmox-netbox-ansible
+VENV  ?= $(HOME)/packetflow/.venv
+# Tools from the dev setup, no need to activate the venv.
+export PATH := $(VENV)/bin:$(HOME)/.local/bin:$(PATH)
+
+SECRETS    := secrets.sops.yaml
+GV_SECRETS := inventory/group_vars/all/secrets.sops.yml
+RUN        := sops exec-env $(SECRETS)
+PLAYBOOK   := ansible-playbook $(ARGS)
+# Targets that run Ansible need the collections from `make deps` (or DEV=1).
+NEED_DEPS  := [ -d .collections/ansible_collections ] || [ "$(DEV)" = 1 ] || \
+              { echo "Ansible collections aren't installed here: run make deps first" >&2; exit 1; }
+
+# The dev venv exports ANSIBLE_CONFIG globally; this repo's config must win.
+export ANSIBLE_CONFIG := $(CURDIR)/ansible.cfg
+
+ifeq ($(DEV),1)
+export ANSIBLE_COLLECTIONS_PATH := $(CHECKOUT):$(CURDIR)/.collections
+endif
+
+.PHONY: help secrets seed template deps plan vms check ansible site zabbix-status update publish
+
+help:
+	@sed -n 's/^#   make /  make /p' $(MAKEFILE_LIST)
+
+secrets:
+	@if [ ! -f $(SECRETS) ]; then \
+	  cp secrets.example.yaml $(SECRETS) && sops encrypt -i $(SECRETS) && echo "created $(SECRETS)"; \
+	fi
+	@if [ ! -f $(GV_SECRETS) ]; then \
+	  cp $(GV_SECRETS).example $(GV_SECRETS) && sops encrypt -i $(GV_SECRETS) && echo "created $(GV_SECRETS)"; \
+	fi
+	@sops edit $(SECRETS) || [ $$? -eq 200 ]  # 200 = closed without changes
+	@sops edit $(GV_SECRETS) || [ $$? -eq 200 ]
+
+# Creates what's missing in NetBox (tenant $(TENANT), site $(TENANT) unless the node
+# already has one, cluster $(CLUSTER),
+# device $(NODE), roles, custom fields); never modifies existing objects.
+seed:
+	@[ -d "$(CHECKOUT)/.git" ] || { echo "no proxmox-netbox-ansible checkout at $(CHECKOUT): clone it and run 'make setup' there, or pass CHECKOUT=<path>" >&2; exit 1; }
+	$(RUN) 'python3 $(CHECKOUT)/scripts/netbox-seed.py --site $(TENANT) --node $(NODE) --cluster $(CLUSTER) \
+	  $(if $(NODE_IP),--node-ip $(NODE_IP)) $(if $(filter 1,$(APPLY)),--apply)'
+
+# Root over SSH on the node. FORCE=1 deletes and rebuilds the existing template
+# (only if it is our template; anything else at that ID is refused).
+template:
+	@$(NEED_DEPS)
+	$(RUN) '$(PLAYBOOK) playbooks/00-template.yml $(if $(filter 1,$(FORCE)),-e template_force=true)'
+
+deps:
+	ansible-galaxy collection install -r requirements.yml -p .collections
+
+plan:
+	@$(NEED_DEPS)
+	$(RUN) '$(PLAYBOOK) playbooks/05-vms.yml -e vms_plan_only=true'
+
+vms:
+	@$(NEED_DEPS)
+	$(RUN) '$(PLAYBOOK) playbooks/05-vms.yml'
+
+check:
+	@$(NEED_DEPS)
+	$(RUN) '$(PLAYBOOK) playbooks/config.yml --check --diff'
+
+ansible:
+	@$(NEED_DEPS)
+	$(RUN) '$(PLAYBOOK) playbooks/config.yml'
+
+site:
+	@$(NEED_DEPS)
+	$(RUN) '$(PLAYBOOK) site.yml'
+
+# Zabbix host status from NetBox (packetflow.zabbix.host_status): out of
+# service in NetBox = disabled in Zabbix. Safe to run on a timer.
+zabbix-status:
+	@$(NEED_DEPS)
+	$(RUN) '$(PLAYBOOK) playbooks/50-zabbix-status.yml$(if $(CHECK), --check)'
+
+# Latest template version (REF=<tag> for another); your answers are kept.
+# Copier needs a clean tree; review the result with git diff, then commit.
+update:
+	@[ -z "$$(git status --porcelain)" ] || { echo "commit your changes first: copier update needs a clean working tree" >&2; exit 1; }
+	copier update --defaults $(if $(REF),--vcs-ref $(REF)) $(foreach d,$(DATA),--data $(d))
+	@echo; echo "Review: git diff. Then commit, and run make deps if requirements.yml changed."
+
+# GitHub, once per site (safe to re-run): creates the private repo $(REPO) and
+# pushes, or pushes if it exists. CI needs no secrets: the collections repo is
+# public.
+publish:
+	@[ -z "$$(git status --porcelain)" ] || { echo "commit your changes first" >&2; exit 1; }
+	@git ls-files --error-unmatch $(SECRETS) $(GV_SECRETS) >/dev/null 2>&1 \
+	  || { echo "run make secrets and commit the encrypted files first" >&2; exit 1; }
+	@[[ "$(REPO)" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$$ ]] \
+	  || { echo "REPO=owner/name is required (gh auth login, or pass REPO=...)" >&2; exit 2; }
+	@if gh repo view $(REPO) >/dev/null 2>&1; then \
+	  git remote get-url origin >/dev/null 2>&1 || git remote add origin https://github.com/$(REPO).git; \
+	  git push -u origin HEAD:main; \
+	else \
+	  gh repo create $(REPO) --private --source . --remote origin --push; \
+	fi

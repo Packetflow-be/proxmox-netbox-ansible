@@ -1,0 +1,10 @@
+---
+# Zabbix host status from NetBox (make zabbix-status): a device or VM that is
+# offline, decommissioning or inventory in NetBox is disabled in Zabbix, and
+# enabled again when active. Runs on this machine against both APIs.
+- name: Zabbix host status from NetBox
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  roles:
+    - packetflow.zabbix.host_status

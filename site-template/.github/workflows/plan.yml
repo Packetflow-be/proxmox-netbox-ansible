@@ -1,0 +1,40 @@
+---
+# `make plan` on PRs: what `make vms` would change in Proxmox. Plan only;
+# `make vms` / `make site` stay manual.
+#
+# Needs a self-hosted runner that can reach NetBox and Proxmox. Until it
+# exists this job is skipped. To enable, set on this repo:
+#   variable PLAN_RUNNER       runner label, e.g. automation
+#   secret   SOPS_AGE_KEY      age private key that can decrypt the secrets
+# The runner needs ansible and sops (`make setup` in proxmox-netbox-ansible).
+name: plan
+
+on:
+  pull_request:
+    paths:
+      - inventory/**
+      - playbooks/05-vms.yml
+      - requirements.yml
+      - secrets.sops.yaml
+      - .github/workflows/plan.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    if: vars.PLAN_RUNNER != ''
+    runs-on: ${{ vars.PLAN_RUNNER }}
+    env:
+      SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: make deps
+        run: make deps
+      - name: make plan
+        run: make plan

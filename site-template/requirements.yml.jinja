@@ -1,0 +1,15 @@
+---
+# `make deps` installs these into ./.collections.
+# Packetflow-be/proxmox-netbox-ansible is public: no credentials needed.
+collections:
+{%- for c in ['proxmox', 'zabbix'] %}
+  - name: git+https://github.com/Packetflow-be/proxmox-netbox-ansible.git#/ansible_collections/packetflow/{{ c }}
+    type: git
+    version: {{ collections_ref }}
+{%- endfor %}
+  - name: community.sops
+    version: ">=2.0.0,<3.0.0"
+  - name: community.proxmox
+    version: ">=1.0.0,<3.0.0"
+  - name: netbox.netbox
+    version: ">=3.20.0,<4.0.0"

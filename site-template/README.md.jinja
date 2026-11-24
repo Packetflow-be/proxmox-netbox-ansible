@@ -1,0 +1,150 @@
+# site-{{ site_slug }}: {{ site_name }}
+
+Site repo, **data only**. The code is the Ansible collections of
+[proxmox-netbox-ansible](https://github.com/Packetflow-be/proxmox-netbox-ansible) at `{{ collections_ref }}`.
+This repo was generated from the Copier template in the same repo; pull
+template changes with `make update` (answers kept; `DATA=key=value` changes one).
+
+**NetBox is the source of truth.** Add, resize or retire VMs in NetBox (tenant
+`{{ netbox_tenant_slug }}`, cluster `{{ netbox_cluster }}`), then `make plan` / `make vms`.
+
+| Path | What |
+|---|---|
+| `inventory/netbox.yml` | Ansible inventory from NetBox (tenant `{{ netbox_tenant_slug }}`, status active) |
+| `inventory/group_vars/all/main.yml` | site settings for the VMs and the template (from the Copier answers) |
+| `site.yml`, `playbooks/` | 05 VMs → 20 OS baseline + Zabbix agent → 30 services; 00 template and 50 Zabbix status (separate) |
+| `secrets.sops.yaml` | API tokens as environment variables for `make` (sops/age encrypted) |
+| `inventory/group_vars/all/secrets.sops.yml` | secret Ansible vars: the Zabbix PSK (sops/age encrypted) |
+
+## Setup (once)
+
+Full walkthrough, from a fresh machine:
+[docs/setup.md](https://github.com/Packetflow-be/proxmox-netbox-ansible/blob/main/docs/setup.md).
+Tools come from `make setup` in the proxmox-netbox-ansible checkout
+(`~/packetflow/proxmox-netbox-ansible`); the Makefile finds them without
+activating the venv. You also need an age key that's one of
+the recipients in `.sops.yaml`, at `~/.config/sops/age/keys.txt`.
+
+```bash
+make secrets        # Proxmox + NetBox tokens, then the Zabbix PSK (two editors)
+git add -A && git commit -m "Add encrypted secrets"
+make publish        # optional: private GitHub repo <your account>/site-{{ site_slug }} (REPO=owner/name for another)
+make deps           # Ansible collections -> .collections/ (every other target needs them)
+make seed           # NetBox objects: dry-run. Missing ones: make seed APPLY=1 [NODE_IP=<ip/prefix>]
+make template       # VM template {{ pve_template_vm_id }} on {{ default_node }}, root over SSH, a few minutes
+make plan           # what make vms would change in Proxmox (changes nothing)
+```
+
+The `*.sops.*` files are encrypted, so committing them is intended.
+
+`make template` connects to the node as **root over SSH** (the NetBox device's
+primary IP) and builds the template from Ubuntu's cloud image with the guest
+agent and the Zabbix agent baked in. `make template FORCE=1` rebuilds it; it
+**deletes the existing template** first, and refuses if VM {{ pve_template_vm_id }}
+is anything else.
+
+`make seed` runs `netbox-seed.py` from your local proxmox-netbox-ansible checkout. It only
+creates what's missing, never changes anything: tenant `{{ netbox_tenant_slug }}`,
+cluster `{{ netbox_cluster }}`, the node `{{ default_node }}` (an existing node
+keeps its site), and the roles and fields the automation uses. Differences
+from what it expects are warnings (exit status 1), not errors.
+
+## Day to day
+
+```bash
+make plan       # what would change in Proxmox (changes nothing)
+make vms        # do it
+make check      # configuration, --check --diff
+make ansible    # configuration
+make site       # vms + configuration, in one run
+```
+
+Every target except `secrets` and `deps` runs as
+`sops exec-env secrets.sops.yaml '<cmd>'`: credentials exist only in that
+command's environment. `ARGS="--limit lab-web01 -v"` passes options to
+ansible-playbook. `make … DEV=1` uses the collections from your local
+proxmox-netbox-ansible checkout (override its path with `CHECKOUT=…`) before
+`.collections/`.
+
+## NetBox → Proxmox (`make vms`)
+
+For each NetBox VM in tenant `{{ netbox_tenant_slug }}` and cluster `{{ netbox_cluster }}`
+(and in the clusters listed in `vms_clusters`, see below):
+
+| Proxmox | From NetBox |
+|---|---|
+| exists and running | status `active`, `planned`, `staged` |
+| exists, stopped | status `offline` |
+| **orphan** | any other status (e.g. `decommissioning`), or removed from NetBox: reported, never deleted |
+| VM ID | `10000` + NetBox VM ID |
+| node | the VM's device, else `{{ default_node }}` |
+| cores / memory / disk | `floor(vCPUs)` / memory / `ceil(total virtual disk MB / 1024)` GB (min 8; disks only grow) |
+| IP | primary IPv4 with prefix (**required**) |
+| network | the untagged VLAN of the VM's interface (802.1Q mode Access): that VLAN's tag on `{{ vm_bridge }}`, or, if the VLAN's custom field `pve_vnet` is set, that Proxmox VNet. Without it: custom field `vlan_id`, else {{ 'untagged' if default_vlan is none else default_vlan }} |
+| gateway | `vms_vlan_gateways[<VLAN ID>]` in `inventory/group_vars/all/main.yml`, else `{{ default_gateway }}`. Must be inside the VM's subnet |
+| DNS | {{ dns_servers | join(', ') }}, search domain `{{ dns_domain }}` |
+
+Only VMs tagged `packetflow` are touched; any plan error stops the run before
+the first change. Orphans make the run end with a failure listing them:
+delete them in Proxmox by hand (Options → Protection off, then Remove) or
+fix their status in NetBox. CPU, memory and cloud-init changes to a running
+VM apply at its next reboot; nothing is rebooted for you. Details: the
+[`vms` role](https://github.com/Packetflow-be/proxmox-netbox-ansible/blob/main/ansible_collections/packetflow/proxmox/roles/vms/README.md).
+
+### Several clusters
+
+VMs of this site on another Proxmox cluster (e.g. a shared one) live
+in that cluster's NetBox cluster. Add the cluster to `vms_clusters` in
+`inventory/group_vars/all/main.yml` (the example there shows the keys) and its
+token to `secrets.sops.yaml` (`make secrets`). `make plan` then shows one plan
+per cluster; an error in any stops the run before anything changes. VMs there
+are cloned from that cluster's template and go into this site's pool.
+
+## Ansible
+
+- The inventory is NetBox. Groups are the raw role and tag slugs: `generic`,
+  `webserver`, `proxmox_node`, … plus `is_virtual` for the VMs.
+- The baseline (`20-baseline.yml`) runs on every VM except those tagged
+  `unmanaged`: your own OS baseline roles and `packetflow.zabbix.agent`
+  (already in the template; this keeps running VMs in line).
+- Services (`30-services.yml`): one play per NetBox role or tag. Add a play
+  that targets the group and lists the role; from then on, giving a VM that
+  service is a tag in NetBox and `make ansible`.
+- Hosts outside the baseline get the Zabbix agent through the NetBox tag
+  `zabbix_agent` (Ubuntu or Debian).
+- The community.sops vars plugin decrypts `*.sops.yml` in group_vars.
+  `host_group_vars` also sees those files, so a harmless `sops` metadata
+  variable shows up in hostvars. The decrypted values win.
+
+## Monitoring
+
+VMs report to `zabbix-proxy` in `{{ dns_domain }}` (resolved by the site's
+DNS: {{ dns_servers | join(', ') }}; the name can point at a Zabbix proxy or at
+the server itself), with PSK encryption and host metadata `packetflow-linux`.
+An autoregistration action on the Zabbix server adds them. Setup: the
+[`agent` role](https://github.com/Packetflow-be/proxmox-netbox-ansible/blob/main/ansible_collections/packetflow/zabbix/roles/agent/README.md).
+
+`make zabbix-status` (`CHECK=1` first) disables the Zabbix host of every device
+or VM of tenant `{{ netbox_tenant_slug }}` that NetBox marks offline, decommissioning or
+inventory, and enables it again when it is active (only hosts it disabled
+itself). Uses `ZABBIX_URL`/`ZABBIX_API_TOKEN` and `NETBOX_TOKEN`; safe on a
+timer. Details: the
+[`host_status` role](https://github.com/Packetflow-be/proxmox-netbox-ansible/blob/main/ansible_collections/packetflow/zabbix/roles/host_status/README.md).
+
+## Credentials
+
+| Where | What |
+|---|---|
+| `secrets.sops.yaml` | `PROXMOX_USER`, `PROXMOX_TOKEN_ID`, `PROXMOX_TOKEN_SECRET` (the `ansible@pve` token), `NETBOX_TOKEN`, `ZABBIX_URL` and `ZABBIX_API_TOKEN` (for `make zabbix-status`), and `<api_env>_USER` / `_TOKEN_ID` / `_TOKEN_SECRET` per extra cluster |
+| `inventory/group_vars/all/secrets.sops.yml` | `zabbix_agent_psk_identity`, `zabbix_agent_psk` |
+| Makefile (not secret) | `NETBOX_URL={{ netbox_url }}`, `NETBOX_VALIDATE_CERTS={{ 'true' if netbox_validate_certs else 'false' }}`, `PROXMOX_HOST={{ pve_host }}`, `PROXMOX_VALIDATE_CERTS={{ 'true' if pve_validate_certs else 'false' }}` |
+| your SSH agent / `~/.ssh` | root on the node (`make template`), `ansible` on the VMs |
+
+## CI
+
+- `ci.yml` runs ansible-lint on every PR and push to main. It installs the
+  collections from the public Packetflow-be/proxmox-netbox-ansible repo, so
+  it needs no secrets.
+- `plan.yml` runs `make plan` on PRs, on a self-hosted runner only. It's
+  skipped until the repo variable `PLAN_RUNNER` (runner label) and the secret
+  `SOPS_AGE_KEY` are set. `make vms` always stays manual.

@@ -1,0 +1,30 @@
+---
+# Config file edits and PSK; the same result as the template bake.
+- name: Point the agent at the proxy
+  ansible.builtin.lineinfile:
+    path: "{{ zabbix_agent_config }}"
+    # Matches the package's line and our replacement, so reruns stay ok.
+    regexp: "^({{ item.key }}=|{{ item.line | regex_escape }}$)"
+    line: "{{ item.line }}"
+  loop: "{{ zabbix_agent_line_edits }}"
+  become: true
+  notify: Restart zabbix-agent2
+
+- name: Metadata and PSK settings
+  ansible.builtin.blockinfile:
+    path: "{{ zabbix_agent_config }}"
+    marker: "{{ zabbix_agent_block_marker }}"
+    block: "{{ zabbix_agent_block_lines | join('\n') }}"
+  become: true
+  notify: Restart zabbix-agent2
+
+- name: PSK file
+  ansible.builtin.copy:
+    content: "{{ zabbix_agent_psk }}\n"
+    dest: "{{ zabbix_agent_psk_file }}"
+    owner: zabbix
+    group: zabbix
+    mode: "0400"
+  no_log: true
+  become: true
+  notify: Restart zabbix-agent2

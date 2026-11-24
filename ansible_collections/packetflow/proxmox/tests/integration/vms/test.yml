@@ -1,0 +1,41 @@
+---
+# Runs the vms role once and writes the plan (and a failure message, if any) to `out`.
+- name: Vms role against the fake APIs
+  hosts: localhost
+  gather_facts: false
+  vars:
+    vms_netbox_tenant: lab
+    vms_netbox_cluster: lab-pve
+    vms_default_node: pve
+    vms_pool: lab
+    vms_default_gateway: 192.168.10.1
+    vms_vlan_gateways: {"20": "10.0.20.1"}
+    vms_dns_servers: [192.168.10.2, 192.168.10.3]
+    vms_dns_domain: lab.example
+    vms_ssh_public_keys: ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPl+test/key test@laptop"]
+    vms_clusters:
+      - {netbox_cluster: lab-pve, api_host: 127.0.0.1, api_port: 18006, validate_certs: false}
+      - netbox_cluster: hq-pve
+        api_host: 127.0.0.1
+        api_port: 18007
+        api_env: PROXMOX_SHARED
+        validate_certs: false
+        default_node: hq1
+        vlan_gateways: {"2042": 10.50.200.1}
+  tasks:
+    - name: Run the role
+      block:
+        - name: Vms
+          ansible.builtin.include_role:
+            name: packetflow.proxmox.vms
+      rescue:
+        - name: Keep the failure message
+          ansible.builtin.set_fact:
+            vms_failed: "{{ ansible_failed_result.msg }}"
+
+    - name: Write the result
+      ansible.builtin.copy:
+        content: "{{ {'plan': vms_plans[0].plan, 'plans': vms_plans | map(attribute='plan') | list,
+                       'failed': vms_failed | default('')} | to_nice_json }}"
+        dest: "{{ out }}"
+        mode: "0644"

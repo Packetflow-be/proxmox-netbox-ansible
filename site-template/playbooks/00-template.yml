@@ -1,0 +1,30 @@
+---
+# `make template` (not part of site.yml): builds the VM template on the
+# default node (vms_default_node) from Ubuntu's cloud image, with the guest
+# agent and Zabbix agent baked in. Runs as root over SSH on that node. The
+# node is found by name, whatever its NetBox role: it must be in the NetBox
+# inventory (tenant of this site, status active, a primary IP).
+- name: Check that the default node is in the inventory
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Default node
+      ansible.builtin.assert:
+        that: vms_default_node in groups['all']
+        fail_msg: >-
+          {{ vms_default_node }} isn't in the NetBox inventory, so the template
+          can't be built there. In NetBox the device needs this site's tenant,
+          status active and a primary IPv4 (make seed NODE_IP=... sets one).
+          If the inventory itself didn't load (warnings above), run make deps.
+        quiet: true
+
+- name: VM template
+  hosts: all
+  gather_facts: false
+  vars:
+    ansible_user: root  # group_vars/all sets the VMs' user
+  tasks:
+    - name: Build the template on the default node
+      ansible.builtin.include_role:
+        name: packetflow.proxmox.template
+      when: inventory_hostname == vms_default_node

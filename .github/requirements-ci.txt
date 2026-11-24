@@ -1,0 +1,11 @@
+# Pinned tooling for .github/workflows/ansible.yml. Bump deliberately.
+ansible-core==2.19.13
+ansible-lint==26.9.0
+yamllint==1.38.0
+molecule==26.9.0
+molecule-plugins[docker]==26.7.15
+# Collection unit/integration tests; the proxmox and netbox modules' Python deps
+pytest==9.1.1
+proxmoxer==2.3.0
+pynetbox==7.8.0
+requests==2.34.2

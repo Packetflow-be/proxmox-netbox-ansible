@@ -1,0 +1,15 @@
+---
+profile: production
+exclude_paths:
+  - .cache/
+  - .ansible/
+  - "*.tar.gz"
+skip_list:
+  # The monorepo is versioned 0.x until the first stable release.
+  - galaxy[version-incorrect]
+  # One version and one set of release notes for the whole monorepo
+  # (GitHub releases), not a changelog per collection.
+  - galaxy[no-changelog]
+  # Role variables use the collection-level prefix (zabbix_agent_* in role
+  # agent); renaming them breaks every inventory that sets them.
+  - var-naming[no-role-prefix]

@@ -1,0 +1,17 @@
+---
+# Wait for a Proxmox task (template_upid) and fail if it didn't end with OK.
+- name: Wait for task {{ template_upid.split(':')[5] | default('') }}
+  ansible.builtin.uri:
+    url: "{{ template_api_url }}/nodes/{{ template_node }}/tasks/{{ template_upid | urlencode }}/status"
+    headers: "{{ template_api_headers }}"
+    validate_certs: "{{ template_api_validate_certs }}"
+  register: template_task
+  until: template_task.json.data.status == 'stopped'
+  retries: "{{ (template_api_timeout | int / 5) | round(0, 'ceil') | int }}"
+  delay: 5
+
+- name: Task result
+  ansible.builtin.assert:
+    that: template_task.json.data.exitstatus == 'OK'
+    fail_msg: "Proxmox task {{ template_upid }} failed: {{ template_task.json.data.exitstatus }}"
+    quiet: true

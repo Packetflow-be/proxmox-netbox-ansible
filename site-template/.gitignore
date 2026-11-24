@@ -1,0 +1,11 @@
+# Ansible
+.collections/
+*.retry
+
+# Decrypted secrets must never be committed; only *.sops.* files are.
+*.dec
+*.dec.*
+*.decrypted*
+.decrypted~*
+secrets.yaml
+secrets.yml

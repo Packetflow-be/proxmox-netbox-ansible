@@ -1,0 +1,27 @@
+---
+namespace: packetflow
+name: zabbix
+version: 0.5.11
+readme: README.md
+authors:
+  - Packetflow (@Packetflow-be)
+description: >-
+  The Zabbix side of VMs built from NetBox: zabbix-agent2 with PSK and autoregistration metadata,
+  baked into the VM template and kept in line on running VMs, and NetBox status to Zabbix host status.
+license:
+  - Apache-2.0
+tags: [monitoring, zabbix]
+# Runtime dependencies. requirements.yml mirrors these plus dev/test-only
+# collections (molecule's docker driver etc.).
+dependencies: {}
+repository: https://github.com/packetflow-be/proxmox-netbox-ansible
+documentation: https://github.com/packetflow-be/proxmox-netbox-ansible/tree/main/ansible_collections/packetflow/zabbix
+issues: https://github.com/packetflow-be/proxmox-netbox-ansible/issues
+build_ignore:
+  - "*.tar.gz"
+  - .ansible-lint
+  - .yamllint
+  - .gitignore
+  - requirements.yml
+  - tests/molecule
+  - roles/*/molecule

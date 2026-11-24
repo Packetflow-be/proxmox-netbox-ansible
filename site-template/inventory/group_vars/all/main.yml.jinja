@@ -1,0 +1,50 @@
+---
+# Site-wide vars for {{ site_name }}, from the Copier answers (change them
+# with `make update DATA=key=value`). Secrets go in secrets.sops.yml next to this file
+# (created by `make secrets`, decrypted by the community.sops vars plugin).
+
+# cloud-init user on the VMs (packetflow.proxmox.vms creates it).
+ansible_user: ansible
+
+# --- VMs: packetflow.proxmox.vms (make plan / make vms) -----------------------
+vms_netbox_tenant: {{ netbox_tenant_slug }}
+vms_netbox_cluster: {{ netbox_cluster }}
+vms_default_node: {{ default_node }}
+vms_template_vmid: {{ pve_template_vm_id }}
+vms_datastore: {{ pve_datastore }}
+vms_bridge: {{ vm_bridge }}
+vms_default_vlan: {{ default_vlan if default_vlan is not none else 'null' }}
+vms_default_gateway: {{ default_gateway }}
+# Gateway per VLAN, when it differs from vms_default_gateway: {"20": 10.0.20.1}
+vms_vlan_gateways: {}
+vms_dns_servers: {{ dns_servers | to_json }}
+vms_dns_domain: {{ dns_domain }}
+vms_ssh_public_keys:
+{%- for key in ssh_public_keys %}
+  # yamllint disable-line rule:line-length
+  - {{ key | to_json }}
+{%- endfor %}
+
+# Clusters beyond this site's own node(s), e.g. a shared cluster elsewhere.
+# Each entry overrides the settings above for that cluster; its token goes in
+# secrets.sops.yaml as <api_env>_USER / _TOKEN_ID / _TOKEN_SECRET. Once you add
+# one, list this site's own cluster too (the settings above apply to it):
+#   vms_clusters:
+#     - netbox_cluster: {{ netbox_cluster }}
+#     - netbox_cluster: shared-pve
+#       api_host: 192.0.2.10
+#       api_env: PROXMOX_SHARED
+#       validate_certs: false
+#       default_node: shared-pve1
+#       pool: {{ site_slug }}
+#       vlan_gateways: {"40": 10.0.40.1}
+vms_clusters: []
+
+# --- Template: packetflow.proxmox.template (make template) -------------------
+template_vmid: "{% raw %}{{ vms_template_vmid }}{% endraw %}"
+template_storage: "{% raw %}{{ vms_datastore }}{% endraw %}"
+template_bridge: "{% raw %}{{ vms_bridge }}{% endraw %}"
+
+# --- Zabbix host status from NetBox: packetflow.zabbix.host_status (make zabbix-status)
+host_status_netbox_tenant: {{ netbox_tenant_slug }}
+host_status_domain: {{ dns_domain }}

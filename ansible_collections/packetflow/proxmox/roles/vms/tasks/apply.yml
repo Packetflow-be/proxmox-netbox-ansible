@@ -1,0 +1,78 @@
+---
+# One VM from the plan; vms_vm.actions says which steps run.
+- name: "Clone template | {{ vms_vm.name }}"
+  community.proxmox.proxmox_kvm:
+    node: "{{ vms_vm.clone_node }}"
+    vmid: "{{ vms_vm.template_vmid | int }}"
+    clone: template  # any value: vmid names the source
+    newid: "{{ vms_vm.vmid }}"
+    name: "{{ vms_vm.name }}"
+    full: true
+    storage: "{{ vms_c.datastore }}"
+    pool: "{{ vms_vm.pool | default(omit, true) }}"
+    target: "{{ vms_vm.target | default(omit, true) }}"
+    timeout: "{{ vms_clone_timeout | int }}"
+  when: "'create' in vms_vm.actions"
+
+# proxmox_kvm update always reports changed, so it only runs when the plan
+# found a difference.
+- name: "Configure | {{ vms_vm.name }}"
+  community.proxmox.proxmox_kvm:
+    node: "{{ vms_vm.node }}"
+    vmid: "{{ vms_vm.vmid }}"
+    update: true
+    name: "{{ vms_vm.name }}"
+    cores: "{{ vms_vm.cores }}"
+    memory: "{{ vms_vm.memory }}"
+    cpu: "{{ vms_vm.cpu }}"
+    agent: "{{ vms_vm.agent }}"
+    onboot: "{{ vms_vm.onboot }}"
+    protection: "{{ vms_vm.protection }}"
+    tags: "{{ vms_vm.tags }}"
+    description: "{{ vms_vm.description }}"
+    ciuser: "{{ vms_vm.ciuser }}"
+    sshkeys: "{{ vms_vm.sshkeys }}"
+    ipconfig:
+      ipconfig0: "{{ vms_vm.ipconfig0 }}"
+    nameservers: "{{ vms_vm.nameservers | default(omit, true) }}"
+    searchdomains: "{{ vms_vm.searchdomains | default(omit, true) }}"
+    timeout: "{{ vms_timeout | int }}"
+  when: "'config' in vms_vm.actions"
+
+# proxmox_nic keeps the MAC address; no tag = untagged.
+- name: "NIC net0 | {{ vms_vm.name }}"
+  community.proxmox.proxmox_nic:
+    vmid: "{{ vms_vm.vmid }}"
+    interface: net0
+    model: virtio
+    bridge: "{{ vms_vm.bridge }}"
+    tag: "{{ vms_vm.vlan | default(omit, true) }}"
+    mtu: "{{ vms_vm.mtu | default(omit, true) }}"
+  when: "'nic' in vms_vm.actions"
+
+- name: "Grow disk scsi0 | {{ vms_vm.name }}"
+  community.proxmox.proxmox_disk:
+    vmid: "{{ vms_vm.vmid }}"
+    disk: scsi0
+    state: resized
+    size: "{{ vms_vm.disk_size }}"
+    timeout: "{{ vms_timeout | int }}"
+  when: "'disk' in vms_vm.actions"
+
+- name: "Start | {{ vms_vm.name }}"
+  community.proxmox.proxmox_kvm:
+    node: "{{ vms_vm.node }}"
+    vmid: "{{ vms_vm.vmid }}"
+    state: started
+    timeout: "{{ vms_timeout | int }}"
+  when: "'start' in vms_vm.actions"
+
+# Guest shutdown first, forced after the timeout.
+- name: "Stop | {{ vms_vm.name }}"
+  community.proxmox.proxmox_kvm:
+    node: "{{ vms_vm.node }}"
+    vmid: "{{ vms_vm.vmid }}"
+    state: stopped
+    force: true
+    timeout: "{{ vms_timeout | int }}"
+  when: "'stop' in vms_vm.actions"

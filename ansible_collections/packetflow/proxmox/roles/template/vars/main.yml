@@ -1,0 +1,15 @@
+---
+template_image: "{{ template_work_dir }}/build/image.{{ (template_image_url | basename).split('.')[-1] }}"
+# What the template is, where it came from and when: shown in Proxmox (Notes).
+template_description: >-
+  {{ template_distros[template_distro].description }} cloud image{{
+  ' + qemu-guest-agent' if template_method == 'ssh' else ' (unmodified, no guest agent)' }}{{
+  ' + zabbix-agent2' if template_zabbix_agent | bool else '' }}{{
+  ' + TEST LOGIN ' ~ template_test_user ~ ' (password set by cloud-init; not for production)'
+  if template_test_password | length > 0 else '' }}{{
+  ' + service account ' ~ template_service_user ~ ' (SSH key, sudo)' if template_service_user | length > 0 else '' }}.
+  Built {{ now(utc=true).strftime('%Y-%m-%d %H:%M UTC') }} by packetflow.proxmox.template
+  from {{ template_image_url }} ({{ template_checksum_algorithm }} {{ template_image_checksum }}).
+template_api_url: "https://{{ template_api_host }}:{{ template_api_port }}/api2/json"
+template_api_headers:
+  Authorization: "PVEAPIToken={{ template_api_user }}!{{ template_api_token_id }}={{ template_api_token_secret }}"

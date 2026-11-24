@@ -1,0 +1,109 @@
+---
+# One cluster (vms_cluster: an entry of vms_clusters, or {} for the site-wide
+# settings): read NetBox and Proxmox, plan, and add the plan to vms_plans.
+- name: Cluster settings
+  ansible.builtin.set_fact:
+    vms_c: "{{ vms_cluster_defaults | combine(vms_cluster) }}"
+    vms_plans: "{{ [] if vms_cluster_index == 0 else vms_plans }}"
+
+- name: Check cluster settings
+  ansible.builtin.assert:
+    that:
+      - vms_c.netbox_cluster | length > 0
+      - "' ' not in vms_c.netbox_cluster"
+      - vms_c.api_host | length > 0
+      - lookup('ansible.builtin.env', vms_c.api_env ~ '_TOKEN_SECRET') | length > 0
+    fail_msg: >-
+      Cluster {{ vms_c.netbox_cluster }}: needs netbox_cluster (no spaces), api_host
+      (or PROXMOX_HOST), and the token in {{ vms_c.api_env }}_USER / _TOKEN_ID / _TOKEN_SECRET.
+    quiet: true
+
+- name: Read VMs and their interfaces from NetBox
+  ansible.builtin.set_fact:
+    vms_netbox: >-
+      {{ query('netbox.netbox.nb_lookup', 'virtual-machines',
+               api_endpoint=vms_netbox_url, token=vms_netbox_token,
+               validate_certs=vms_netbox_validate_certs, raw_data=true,
+               api_filter='tenant=' ~ vms_netbox_tenant ~ ' cluster=' ~ vms_c.netbox_cluster) }}
+    vms_netbox_interfaces: >-
+      {{ query('netbox.netbox.nb_lookup', 'virtualization-interfaces',
+               api_endpoint=vms_netbox_url, token=vms_netbox_token,
+               validate_certs=vms_netbox_validate_certs, raw_data=true,
+               api_filter='cluster=' ~ vms_c.netbox_cluster) }}
+
+# Only the VLANs the interfaces use: their custom field pve_vnet names the
+# Proxmox VNet that carries them.
+- name: Read the interfaces' VLANs from NetBox
+  ansible.builtin.set_fact:
+    vms_netbox_vlans: >-
+      {{ query('netbox.netbox.nb_lookup', 'vlans',
+               api_endpoint=vms_netbox_url, token=vms_netbox_token,
+               validate_certs=vms_netbox_validate_certs, raw_data=true,
+               api_filter=vms_vlan_ids | map('regex_replace', '^', 'id=') | join(' '))
+         if vms_vlan_ids | length > 0 else [] }}
+  vars:
+    vms_vlan_ids: >-
+      {{ vms_netbox_interfaces | selectattr('untagged_vlan') | map(attribute='untagged_vlan.id')
+         | unique | map('string') | list }}
+
+- name: Read VMs from Proxmox
+  community.proxmox.proxmox_vm_info:
+    type: qemu
+    config: pending
+  module_defaults:
+    group/community.proxmox.proxmox: "{{ vms_api_args }}"
+  register: vms_proxmox
+
+- name: Plan
+  ansible.builtin.set_fact:
+    vms_plans: >-
+      {{ vms_plans + [{'cluster': vms_c,
+                       'plan': vms_netbox | packetflow.proxmox.vm_plan(vms_proxmox.proxmox_vms, vms_settings)}] }}
+  vars:
+    vms_vnet_vlans: >-
+      {{ vms_netbox_vlans | selectattr('custom_fields.pve_vnet', 'defined') | selectattr('custom_fields.pve_vnet') | list }}
+    vms_settings:
+      default_node: "{{ vms_c.default_node }}"
+      template_vmid: "{{ vms_c.template_vmid | int }}"
+      datastore: "{{ vms_c.datastore }}"
+      bridge: "{{ vms_c.bridge }}"
+      default_vlan: "{{ vms_c.default_vlan }}"
+      default_gateway: "{{ vms_c.default_gateway }}"
+      vlan_gateways: "{{ vms_c.vlan_gateways }}"
+      dns_servers: "{{ vms_dns_servers }}"
+      dns_domain: "{{ vms_dns_domain }}"
+      ssh_public_keys: "{{ vms_ssh_public_keys }}"
+      ci_user: "{{ vms_ci_user }}"
+      vmid_offset: "{{ vms_vmid_offset | int }}"
+      managed_tag: "{{ vms_managed_tag }}"
+      pool: "{{ vms_c.pool }}"
+      unmanaged_tag: "{{ vms_unmanaged_tag }}"
+      name_pattern: "{{ vms_name_pattern }}"
+      cpu_type: "{{ vms_c.cpu_type }}"
+      templates: "{{ vms_c.templates }}"
+      dhcp_tag: "{{ vms_dhcp_tag }}"
+      protection: "{{ vms_protection | bool }}"
+      onboot: "{{ vms_onboot | bool }}"
+      netbox_interfaces: "{{ vms_netbox_interfaces }}"
+      vnets: >-
+        {{ dict(vms_vnet_vlans | map(attribute='id') | map('string')
+                | zip(vms_vnet_vlans | map(attribute='custom_fields.pve_vnet'))) }}
+
+# The plan of the cluster just planned (with one cluster: the plan, as before).
+- name: Remember the plan
+  ansible.builtin.set_fact:
+    vms_plan: "{{ vms_plans[-1].plan }}"
+
+- name: Show plan
+  ansible.builtin.debug:
+    msg: >-
+      {{ ['NetBox ' ~ vms_netbox_tenant ~ '/' ~ vms_c.netbox_cluster ~ ': '
+          ~ vms_plan.summary['create'] ~ ' to create, ' ~ vms_plan.summary['update'] ~ ' to change, '
+          ~ vms_plan.summary['unchanged'] ~ ' unchanged, ' ~ vms_plan.summary['orphans'] ~ ' orphaned, '
+          ~ vms_plan.summary['errors'] ~ ' errors, ' ~ vms_plan.summary['unmanaged'] ~ ' unmanaged (skipped)']
+         + (vms_plan.vms | selectattr('actions') | map(attribute='name') | zip(
+              vms_plan.vms | selectattr('actions') | map(attribute='changes') | map('join', '; '))
+            | map('join', ': ') | list)
+         + (vms_plan.warnings | map('regex_replace', '^', 'WARNING ') | list)
+         + (vms_plan.errors | map('regex_replace', '^', 'ERROR ') | list)
+         + (vms_plan.orphans | map(attribute='name') | map('regex_replace', '^', 'ORPHAN ') | list) }}

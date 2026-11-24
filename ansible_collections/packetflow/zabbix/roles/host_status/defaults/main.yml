@@ -1,0 +1,19 @@
+---
+# Zabbix host status from NetBox (module packetflow.zabbix.host_status). Runs
+# on the controller; see README.md.
+
+# URLs and tokens from the environment (the site's secrets.sops.yaml).
+host_status_zabbix_url: "{{ lookup('ansible.builtin.env', 'ZABBIX_URL') }}"
+host_status_zabbix_token: "{{ lookup('ansible.builtin.env', 'ZABBIX_API_TOKEN') }}"
+host_status_zabbix_validate_certs: "{{ lookup('ansible.builtin.env', 'ZABBIX_VALIDATE_CERTS', default='true') | bool }}"
+host_status_netbox_url: "{{ lookup('ansible.builtin.env', 'NETBOX_URL') }}"
+host_status_netbox_token: "{{ lookup('ansible.builtin.env', 'NETBOX_TOKEN') }}"
+host_status_netbox_validate_certs: "{{ lookup('ansible.builtin.env', 'NETBOX_VALIDATE_CERTS', default='true') | bool }}"
+
+# NetBox tenant whose devices and VMs count (required).
+host_status_netbox_tenant: ""
+# Zabbix host names may be the NetBox name plus this domain.
+host_status_domain: ""
+host_status_disable_statuses: [offline, decommissioning, inventory]
+host_status_enable_statuses: [active]
+host_status_tag: netbox_status

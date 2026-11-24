@@ -1,0 +1,4 @@
+*.tar.gz
+*.retry
+.vscode/
+.idea/

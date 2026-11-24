@@ -1,0 +1,6 @@
+---
+- name: Template role on this machine (fake qm and virt-customize)
+  hosts: localhost
+  gather_facts: false
+  roles:
+    - packetflow.proxmox.template

@@ -1,0 +1,45 @@
+---
+- name: Settings are complete
+  ansible.builtin.assert:
+    that:
+      - host_status_netbox_tenant | length > 0
+      - host_status_zabbix_url | length > 0
+      - host_status_zabbix_token | length > 0
+      - host_status_netbox_url | length > 0
+      - host_status_netbox_token | length > 0
+    fail_msg: >-
+      Set host_status_netbox_tenant, and ZABBIX_URL, ZABBIX_API_TOKEN, NETBOX_URL,
+      NETBOX_TOKEN (the site's secrets.sops.yaml)
+    quiet: true
+
+- name: Zabbix host status from NetBox
+  packetflow.zabbix.host_status:
+    zabbix_url: "{{ host_status_zabbix_url }}"
+    zabbix_token: "{{ host_status_zabbix_token }}"
+    zabbix_validate_certs: "{{ host_status_zabbix_validate_certs }}"
+    netbox_url: "{{ host_status_netbox_url }}"
+    netbox_token: "{{ host_status_netbox_token }}"
+    netbox_validate_certs: "{{ host_status_netbox_validate_certs }}"
+    netbox_filter: {tenant: "{{ host_status_netbox_tenant }}"}
+    domain: "{{ host_status_domain }}"
+    disable_statuses: "{{ host_status_disable_statuses }}"
+    enable_statuses: "{{ host_status_enable_statuses }}"
+    tag: "{{ host_status_tag }}"
+  register: host_status_result
+  failed_when: false  # reported below, without the module arguments
+  no_log: true  # the tokens
+
+- name: Changes
+  ansible.builtin.debug:
+    msg: "{{ host_status_result.changes | default([]) }}"
+  changed_when: host_status_result.changes | default([]) | length > 0
+
+- name: Warnings
+  ansible.builtin.debug:
+    msg: "{{ host_status_result.warnings }}"
+  when: host_status_result.warnings | default([]) | length > 0
+
+- name: Failed
+  ansible.builtin.fail:
+    msg: "{{ host_status_result.msg }}"
+  when: host_status_result.msg is defined  # fail_json; exit_json has no msg

@@ -1,0 +1,21 @@
+---
+# Compatible with ansible-lint's yamllint requirements.
+extends: default
+ignore: |
+  .cache/
+  .ansible/
+rules:
+  line-length:
+    max: 160
+  truthy:
+    allowed-values: ["true", "false"]
+    check-keys: false
+  braces:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+  comments:
+    min-spaces-from-content: 1
+  comments-indentation: false
+  octal-values:
+    forbid-implicit-octal: true
+    forbid-explicit-octal: true

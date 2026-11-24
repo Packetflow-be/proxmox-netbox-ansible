@@ -1,0 +1,24 @@
+---
+# Day-2: keeps a running VM's agent in line with the template (tasks/bake.yml).
+# On a VM cloned from the template every task below reports ok.
+- name: Validate settings
+  ansible.builtin.include_tasks: validate.yml
+
+- name: Zabbix repository
+  ansible.builtin.include_tasks: repo.yml
+
+- name: Install zabbix-agent2
+  ansible.builtin.apt:
+    name: zabbix-agent2
+    update_cache: true
+  become: true
+
+- name: Configure the agent
+  ansible.builtin.include_tasks: config.yml
+
+- name: Agent enabled and running
+  ansible.builtin.systemd_service:
+    name: zabbix-agent2
+    enabled: true
+    state: started
+  become: true

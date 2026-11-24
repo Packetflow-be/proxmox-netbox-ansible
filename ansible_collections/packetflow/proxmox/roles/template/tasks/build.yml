@@ -1,0 +1,144 @@
+---
+- name: Install virt-customize (libguestfs-tools)
+  ansible.builtin.apt:
+    name: libguestfs-tools
+    update_cache: true
+    cache_valid_time: 3600
+  when: template_install_tools | bool
+
+- name: Work directories
+  ansible.builtin.file:
+    path: "{{ template_work_dir }}/{{ item }}"
+    state: directory
+    mode: "0700"
+  loop: [cache, build]
+
+# Kept in cache/ between builds; downloaded again only when the checksum changes.
+- name: Download the cloud image (checksum from {{ template_checksum_url | basename }})
+  ansible.builtin.get_url:
+    url: "{{ template_image_url }}"
+    dest: "{{ template_work_dir }}/cache/{{ template_image_url | basename }}"
+    checksum: "{{ template_checksum_algorithm }}:{{ template_checksum_url }}"
+    mode: "0644"
+    timeout: 60
+
+- name: Checksum of the image, for the template's description
+  ansible.builtin.stat:
+    path: "{{ template_work_dir }}/cache/{{ template_image_url | basename }}"
+    checksum_algorithm: "{{ template_checksum_algorithm }}"
+  register: template_image_stat
+
+- name: Remember it
+  ansible.builtin.set_fact:
+    template_image_checksum: "{{ template_image_stat.stat.checksum }}"
+
+# Same extension as the download: qcow2 and raw images are both detected by content.
+- name: Working copy of the image
+  ansible.builtin.copy:
+    src: "{{ template_work_dir }}/cache/{{ template_image_url | basename }}"
+    dest: "{{ template_image }}"
+    remote_src: true
+    mode: "0600"
+
+- name: Service account key
+  ansible.builtin.copy:
+    content: "{{ template_service_ssh_keys | trim }}\n"
+    dest: "{{ template_work_dir }}/build/service_keys.pub"
+    mode: "0600"
+  when: template_service_user | length > 0
+
+- name: Zabbix agent files
+  ansible.builtin.include_role:
+    name: packetflow.zabbix.agent
+    tasks_from: bake
+  vars:
+    zabbix_agent_bake_dir: "{{ template_work_dir }}/build/zabbix"
+    zabbix_agent_repo_distro: ubuntu
+    zabbix_agent_repo_suite: "{{ template_distros[template_distro].codename | default('noble') }}"
+  when: template_zabbix_agent | bool
+
+# Offline, in the order given: guest agent, Zabbix agent, test login, clean-up.
+# The image is still generalized afterwards (no machine-id, no SSH host keys,
+# cloud-init unused).
+- name: Customize the image
+  ansible.builtin.command:
+    argv: >-
+      {{ ['virt-customize', '-a', template_image, '--install', 'qemu-guest-agent']
+         + (zabbix_agent_bake_args if template_zabbix_agent | bool else [])
+         + (['--write', '/etc/ssh/sshd_config.d/01-packetflow-test-login.conf:PasswordAuthentication yes']
+            if template_test_password | length > 0 else [])
+         + (['--run-command', 'useradd --create-home --shell /bin/bash ' ~ template_service_user,
+             '--ssh-inject', template_service_user ~ ':file:' ~ template_work_dir ~ '/build/service_keys.pub',
+             '--write', '/etc/sudoers.d/90-' ~ template_service_user ~ ':' ~ template_service_user ~ ' ALL=(ALL) NOPASSWD:ALL',
+             '--chmod', '0440:/etc/sudoers.d/90-' ~ template_service_user]
+            if template_service_user | length > 0 else [])
+         + ['--run-command', template_distros[template_distro].cleanup | default('apt-get clean'),
+            '--truncate', '/etc/machine-id'] }}
+  environment:
+    LIBGUESTFS_BACKEND: direct
+  changed_when: true
+
+- name: Remove the old template
+  ansible.builtin.command: qm destroy {{ template_vmid }}
+  when: template_exists
+  changed_when: true
+
+# Cloud images log to the serial console; the rest matches the VMs' defaults.
+- name: Create the template VM from the image
+  ansible.builtin.command:
+    argv:
+      - qm
+      - create
+      - "{{ template_vmid }}"
+      - --name
+      - "{{ template_name }}"
+      - --description
+      - "{{ template_description }}"
+      - --tags
+      - "template;{{ template_distro }}"
+      - --ostype
+      - l26
+      - --cpu
+      - x86-64-v2-AES
+      - --cores
+      - "2"
+      - --memory
+      - "2048"
+      - --scsihw
+      - virtio-scsi-single
+      - --scsi0
+      - "{{ template_storage }}:0,import-from={{ template_image }},discard=on,iothread=1,ssd=1"
+      - --ide2
+      - "{{ template_storage }}:cloudinit"
+      - --boot
+      - order=scsi0
+      - --net0
+      - "virtio,bridge={{ template_bridge }}"
+      - --serial0
+      - socket
+      - --vga
+      - serial0
+      - --agent
+      - enabled=1
+  changed_when: true
+
+# Proxmox stores the password hashed; every clone inherits it.
+- name: Test SSH keys
+  ansible.builtin.copy:
+    content: "{{ template_test_ssh_keys | trim }}\n"
+    dest: "{{ template_work_dir }}/build/test_keys.pub"
+    mode: "0600"
+  when: template_test_ssh_keys | trim | length > 0
+
+- name: Test login through cloud-init
+  ansible.builtin.command:
+    argv: >-
+      {{ ['qm', 'set', template_vmid | string, '--ciuser', template_test_user, '--cipassword', template_test_password]
+         + (['--sshkeys', template_work_dir ~ '/build/test_keys.pub'] if template_test_ssh_keys | trim | length > 0 else []) }}
+  when: template_test_password | length > 0
+  no_log: true
+  changed_when: true
+
+- name: Convert to template
+  ansible.builtin.command: qm template {{ template_vmid }}
+  changed_when: true

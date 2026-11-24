@@ -1,0 +1,19 @@
+---
+# NetBox VMs only (group is_virtual), and not the hand-built ones tagged
+# `unmanaged`: never physical devices (nodes, firewalls, switches, APs).
+- name: OS baseline
+  hosts: is_virtual:!unmanaged
+  gather_facts: false
+  become: true
+  pre_tasks:
+    # VMs created earlier in the same run (make site) may still be booting.
+    - name: Wait for SSH
+      ansible.builtin.wait_for_connection:
+        timeout: 300
+
+    - name: Gather facts
+      ansible.builtin.setup:
+  roles:
+    # Your own OS baseline roles go here (apt, NTP, unattended upgrades, ...).
+    # Already in the template; keeps running VMs in line (e.g. PSK rotation).
+    - packetflow.zabbix.agent

@@ -1,0 +1,28 @@
+---
+# One cluster's settings: the site-wide ones, overridden per entry of vms_clusters.
+vms_cluster_keys: [netbox_cluster, api_host, api_port, api_env, validate_certs, default_node, template_vmid,
+                   datastore, bridge, default_vlan, default_gateway, vlan_gateways, pool, cpu_type, templates]
+vms_cluster_defaults:
+  netbox_cluster: "{{ vms_netbox_cluster }}"
+  api_host: "{{ vms_api_host }}"
+  api_port: "{{ vms_api_port }}"
+  api_env: "{{ vms_api_env }}"
+  validate_certs: "{{ vms_api_validate_certs }}"
+  default_node: "{{ vms_default_node }}"
+  template_vmid: "{{ vms_template_vmid }}"
+  datastore: "{{ vms_datastore }}"
+  bridge: "{{ vms_bridge }}"
+  default_vlan: "{{ vms_default_vlan }}"
+  default_gateway: "{{ vms_default_gateway }}"
+  vlan_gateways: "{{ vms_vlan_gateways }}"
+  pool: "{{ vms_pool }}"
+  cpu_type: "{{ vms_cpu_type }}"
+  templates: "{{ vms_templates }}"
+# The Proxmox modules' connection, for module_defaults (vms_c: the cluster being worked on).
+vms_api_args:
+  api_host: "{{ vms_c.api_host }}"
+  api_port: "{{ vms_c.api_port | int }}"
+  api_user: "{{ lookup('ansible.builtin.env', vms_c.api_env ~ '_USER') }}"
+  api_token_id: "{{ lookup('ansible.builtin.env', vms_c.api_env ~ '_TOKEN_ID') }}"
+  api_token_secret: "{{ lookup('ansible.builtin.env', vms_c.api_env ~ '_TOKEN_SECRET') }}"
+  validate_certs: "{{ vms_c.validate_certs | bool }}"

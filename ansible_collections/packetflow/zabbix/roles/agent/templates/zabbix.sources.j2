@@ -1,0 +1,6 @@
+# {{ ansible_managed }}
+Types: deb
+URIs: {{ zabbix_agent_repo_url }}
+Suites: {{ zabbix_agent_repo_suite }}
+Components: main
+Signed-By: {{ zabbix_agent_keyring }}

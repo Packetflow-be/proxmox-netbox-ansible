@@ -1,0 +1,18 @@
+---
+# NetBox dynamic inventory for {{ site_name }}.
+# Token: NETBOX_TOKEN (secrets.sops.yaml, injected by make).
+# Groups are the raw role and tag slugs, e.g. `proxmox_node`, `webserver`.
+plugin: netbox.netbox.nb_inventory
+api_endpoint: {{ netbox_url }}
+validate_certs: {{ 'true' if netbox_validate_certs else 'false' }}
+query_filters:
+  - tenant: {{ netbox_tenant_slug }}
+  - status: active
+# plurals: false = current host var layout (role, tags, ... not wrapped in
+# lists); it's also what makes `role`/`tag` valid group_by keys.
+plurals: false
+group_by:
+  - role
+  - tag
+  - is_virtual   # group is_virtual: the VMs (20-baseline.yml targets them)
+group_names_raw: true

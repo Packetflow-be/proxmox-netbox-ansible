@@ -1,0 +1,6 @@
+---
+# sops: which files are encrypted, and for whom.
+creation_rules:
+  - path_regex: \.sops\.ya?ml$
+    age: >-
+      {{ age_recipients }}

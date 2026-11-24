@@ -1,0 +1,11 @@
+---
+# Dev/test install: runtime dependencies from galaxy.yml plus test-only
+# collections. Keep the runtime entries in sync with galaxy.yml.
+collections:
+  - name: community.general
+    version: ">=10.0.0,<14.0.0"
+  # community.general >= 11 only redirects its proxmox modules here
+  - name: community.proxmox
+    version: ">=1.0.0,<3.0.0"
+  - name: netbox.netbox
+    version: ">=3.0.0,<4.0.0"
