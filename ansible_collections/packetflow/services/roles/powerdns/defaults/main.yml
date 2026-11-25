@@ -1,0 +1,49 @@
+---
+# One host = one resolver for clients (pdns-recursor on :53) in front of a
+# local authoritative server (pdns, SQLite, 127.0.0.1 only). The zones'
+# content comes from NetBox DNS (netbox-plugin-dns): octoDNS copies it into
+# the authoritative server on a timer. NetBox down = the last copy keeps
+# being served.
+
+# Zones served from NetBox DNS. The recursor sends these to the local
+# authoritative server; octoDNS syncs exactly these. A zone must exist in
+# NetBox DNS (status active) before it's listed here.
+powerdns_zones: []
+#   - internal.example.com
+#   - 30.0.10.in-addr.arpa
+
+# Recursor
+# Addresses to listen on. Not 0.0.0.0: systemd-resolved holds 127.0.0.53:53.
+powerdns_recursor_listen: >-
+  {{ [ansible_facts['default_ipv4']['address'], '127.0.0.1']
+     + ([ansible_facts['default_ipv6']['address']] if ansible_facts['default_ipv6']['address'] is defined else []) }}
+# Who may ask (recursion included).
+powerdns_recursor_allow_from: [127.0.0.0/8, "::1/128", 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, "fc00::/7"]
+# Forward everything else to these resolvers ([] = resolve from the root).
+powerdns_recursor_forwarders: []
+# process / log-common / validate (DNSSEC; the local zones get a negative
+# trust anchor, private zones can't validate against the public tree).
+powerdns_recursor_dnssec: validate
+
+# Authoritative server
+powerdns_auth_port: 5300
+powerdns_api_port: 8081
+# Required, from the site's encrypted vars: `openssl rand -hex 32`.
+powerdns_api_key: ""
+powerdns_db: /var/lib/powerdns/pdns.sqlite3
+# SOA of zones octoDNS creates (octoDNS doesn't manage SOA). The serial is
+# raised on every API change (soa-edit-api).
+powerdns_default_soa_content: "{{ ansible_facts['fqdn'] }}. hostmaster.@ 0 10800 3600 604800 3600"
+
+# octoDNS: NetBox DNS -> local PowerDNS
+powerdns_octodns_dir: /opt/octodns
+powerdns_octodns_packages:
+  - octodns==1.22.0
+  - octodns-netbox-dns==0.3.19
+  - octodns-powerdns==1.2.0
+powerdns_netbox_url: ""
+# Required: a NetBox token that can read the netbox_dns objects.
+powerdns_netbox_token: ""
+powerdns_netbox_validate_certs: true
+# systemd OnCalendar for the sync.
+powerdns_sync_schedule: "*:0/5"

@@ -1,0 +1,25 @@
+# {{ ansible_managed }}
+# NetBox DNS -> local PowerDNS. Tokens come from /etc/octodns/env.
+# octoDNS refuses a run that would update or delete more than 30 % of a zone
+# with 10+ records: check `octodns-sync` output by hand, then run it with --force.
+manager:
+  max_workers: 1
+providers:
+  netbox:
+    class: octodns_netbox_dns.NetBoxDNSProvider
+    url: {{ powerdns_netbox_url | to_json }}
+    token: env/NETBOX_TOKEN
+    make_absolute: true
+    insecure_request: {{ (not powerdns_netbox_validate_certs) | to_json }}
+  powerdns:
+    class: octodns_powerdns.PowerDnsProvider
+    host: 127.0.0.1
+    port: {{ powerdns_api_port }}
+    scheme: http
+    api_key: env/POWERDNS_API_KEY
+zones:
+{% for zone in powerdns_zones %}
+  {{ (zone ~ '.') | to_json }}:
+    sources: [netbox]
+    targets: [powerdns]
+{% endfor %}

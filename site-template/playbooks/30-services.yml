@@ -1,8 +1,8 @@
 ---
 # Services per NetBox role or tag. The inventory (inventory/netbox.yml) turns
 # every role and tag slug into a group, so a play targets a group and NetBox
-# decides which VMs are in it. Add one play per service, with a role of your
-# own or from Galaxy:
+# decides which VMs are in it. A play whose group is empty does nothing. Add
+# one play per service, with a role of your own or from Galaxy:
 #
 # - name: Webservers
 #   hosts: webserver       # NetBox role `webserver`
@@ -15,6 +15,24 @@
 #   become: true
 #   roles:
 #     - your_namespace.your_collection.postgresql
+
+# Internal DNS: PowerDNS with its zones synced from NetBox DNS every 5 minutes.
+# Variables and secrets in inventory/host_vars/<host>/ (the role's README).
+- name: DNS
+  hosts: powerdns        # NetBox tag `powerdns`
+  become: true
+  roles:
+    - packetflow.services.powerdns
+
+# Reverse proxy with a Let's Encrypt certificate (DNS-01, so it also works for
+# names that only exist internally). certbot first: the real certificate is
+# there before HAProxy starts.
+- name: Reverse proxy
+  hosts: haproxy         # NetBox tag `haproxy`
+  become: true
+  roles:
+    - packetflow.services.certbot
+    - packetflow.services.haproxy
 
 # Zabbix agent on hosts the baseline skips (hand-built VMs tagged `unmanaged`);
 # managed VMs get it in 20-baseline.yml.

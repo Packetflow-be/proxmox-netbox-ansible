@@ -115,7 +115,7 @@ age_recipients:
 collections_ref:
   type: str
   help: Tag (or branch) of this repo to install the Ansible collections from
-  default: v0.5.11
+  default: v0.5.12
 
 _message_after_copy: |
   Created {{ _copier_conf.dst_path }} for {{ site_name }}.

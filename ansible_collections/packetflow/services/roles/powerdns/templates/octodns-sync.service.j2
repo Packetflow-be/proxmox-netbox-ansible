@@ -1,0 +1,20 @@
+# {{ ansible_managed }}
+[Unit]
+Description=octoDNS: NetBox DNS -> local PowerDNS
+After=network-online.target pdns.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=octodns
+Group=octodns
+EnvironmentFile=/etc/octodns/env
+ExecStart={{ powerdns_octodns_dir }}/bin/octodns-sync --config-file /etc/octodns/config.yaml --doit
+# Changed records show at once instead of after their TTL.
+{% for zone in powerdns_zones %}
+ExecStartPost=+/usr/bin/rec_control wipe-cache {{ zone }}$
+{% endfor %}
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes

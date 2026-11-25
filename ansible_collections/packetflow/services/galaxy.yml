@@ -1,0 +1,26 @@
+---
+namespace: packetflow
+name: services
+version: 0.5.12
+readme: README.md
+authors:
+  - Packetflow (@Packetflow-be)
+description: >-
+  Service roles for VMs built from NetBox: PowerDNS with zones synced from NetBox DNS, HAProxy, certbot.
+license:
+  - Apache-2.0
+tags: [application, linux]
+# Runtime dependencies. requirements.yml mirrors these plus dev/test-only
+# collections (molecule's docker driver etc.).
+dependencies: {}
+repository: https://github.com/Packetflow-be/proxmox-netbox-ansible
+documentation: https://github.com/Packetflow-be/proxmox-netbox-ansible/tree/main/ansible_collections/packetflow/services
+issues: https://github.com/Packetflow-be/proxmox-netbox-ansible/issues
+build_ignore:
+  - "*.tar.gz"
+  - .ansible-lint
+  - .yamllint
+  - .gitignore
+  - requirements.yml
+  - tests/molecule
+  - roles/*/molecule

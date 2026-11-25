@@ -1,0 +1,17 @@
+# {{ ansible_managed }}
+# Authoritative server: local only, the recursor on :53 is what clients ask.
+# Content is written by octoDNS (octodns-sync.timer) through the API.
+launch=gsqlite3
+gsqlite3-database={{ powerdns_db }}
+local-address=127.0.0.1
+local-port={{ powerdns_auth_port }}
+
+api=yes
+api-key={{ powerdns_api_key }}
+webserver=yes
+webserver-address=127.0.0.1
+webserver-port={{ powerdns_api_port }}
+webserver-allow-from=127.0.0.1/32
+
+default-soa-content={{ powerdns_default_soa_content }}
+default-api-rectify=yes

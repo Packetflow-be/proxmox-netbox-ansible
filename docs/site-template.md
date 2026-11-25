@@ -103,7 +103,7 @@ Walkthrough: [setup.md](setup.md).
 | `dns_domain` | **required** | cloud-init search domain; `zabbix-proxy.<domain>` |
 | `ssh_public_keys` | | cloud-init user `ansible` (at least one key) |
 | `age_recipients` | | `.sops.yaml` (comma-separated `age1…` public keys) |
-| `collections_ref` | `v0.5.11` | the tag of this repo to install the collections from |
+| `collections_ref` | `v0.5.12` | the tag of this repo to install the collections from |
 
 `ssh_public_keys` is a question because a VM without a key is unreachable.
 `dns_servers` and `dns_domain` have no defaults: VMs find Zabbix through the

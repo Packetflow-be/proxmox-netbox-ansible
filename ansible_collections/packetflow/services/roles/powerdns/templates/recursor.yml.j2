@@ -1,0 +1,25 @@
+# {{ ansible_managed }}
+# Clients ask here. The zones in powerdns_zones go to the local
+# authoritative server, the rest {{ 'to ' ~ (powerdns_recursor_forwarders | join(', ')) if powerdns_recursor_forwarders else 'is resolved from the root' }}.
+incoming:
+  listen: {{ powerdns_recursor_listen | to_json }}
+  allow_from: {{ powerdns_recursor_allow_from | to_json }}
+dnssec:
+  validation: {{ powerdns_recursor_dnssec }}
+  # Private zones: nothing in the public tree to validate them against.
+  negative_trustanchors:
+{% for zone in powerdns_zones %}
+    - name: {{ zone | to_json }}
+      reason: served locally from NetBox DNS
+{% endfor %}
+recursor:
+  forward_zones:
+{% for zone in powerdns_zones %}
+    - zone: {{ zone | to_json }}
+      forwarders: ["127.0.0.1:{{ powerdns_auth_port }}"]
+{% endfor %}
+{% if powerdns_recursor_forwarders %}
+  forward_zones_recurse:
+    - zone: "."
+      forwarders: {{ powerdns_recursor_forwarders | to_json }}
+{% endif %}

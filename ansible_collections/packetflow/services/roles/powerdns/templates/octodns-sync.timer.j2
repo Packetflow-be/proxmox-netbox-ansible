@@ -1,0 +1,11 @@
+# {{ ansible_managed }}
+[Unit]
+Description=octoDNS sync from NetBox DNS
+
+[Timer]
+OnCalendar={{ powerdns_sync_schedule }}
+RandomizedDelaySec=30
+Persistent=true
+
+[Install]
+WantedBy=timers.target

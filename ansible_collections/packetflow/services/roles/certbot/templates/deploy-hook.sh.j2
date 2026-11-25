@@ -1,0 +1,23 @@
+#!/bin/sh
+# {{ ansible_managed }}
+# certbot deploy hook for {{ item.name }}: runs after every issuance and renewal
+# (certbot sets RENEWED_LINEAGE), and from Ansible when this script changes.
+set -eu
+live="${RENEWED_LINEAGE:-/etc/letsencrypt/live/{{ item.name }}}"
+{% if item.pem | default('') %}
+
+# fullchain + private key in one file, replaced atomically.
+dest={{ item.pem | quote }}
+mkdir -p "$(dirname "$dest")"
+umask 077
+tmp="$(mktemp "$(dirname "$dest")/.certbot.XXXXXX")"
+cat "$live/fullchain.pem" "$live/privkey.pem" > "$tmp"
+chown {{ item.pem_owner | default('root') }}:{{ item.pem_group | default('root') }} "$tmp"
+chmod {{ item.pem_mode | default('0600') }} "$tmp"
+mv -f "$tmp" "$dest"
+{% endif %}
+{% for unit in item.reload | default([]) %}
+
+# Does nothing while {{ unit }} isn't running (e.g. not installed yet).
+systemctl try-reload-or-restart {{ unit | quote }}
+{% endfor %}

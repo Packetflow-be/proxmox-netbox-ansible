@@ -36,9 +36,11 @@ options:
     type: str
     required: true
   zabbix_validate_certs:
+    description: Verify the TLS certificate of the Zabbix API.
     type: bool
     default: true
   netbox_url:
+    description: Base URL of NetBox.
     type: str
     required: true
   netbox_token:
@@ -46,10 +48,11 @@ options:
     type: str
     required: true
   netbox_validate_certs:
+    description: Verify the TLS certificate of NetBox.
     type: bool
     default: true
   netbox_filter:
-    description: Query parameters for both NetBox lists, e.g. C({tenant: acme}).
+    description: "Query parameters for both NetBox lists, e.g. C({tenant: acme})."
     type: dict
     default: {}
   domain:

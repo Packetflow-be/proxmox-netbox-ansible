@@ -122,7 +122,7 @@ The answers that matter most:
 | `dns_servers`, `dns_domain` | **the site's** DNS servers and domain. `zabbix-proxy.<domain>` must resolve through them |
 | `ssh_public_keys` | your key, e.g. `["ssh-ed25519 AAAA… you@laptop"]`; Ansible connects to the VMs as `ansible` with it |
 | `age_recipients` | the `age1…` public key from step 2 |
-| `collections_ref` | the tag of this repo to pin, e.g. `v0.5.11` (the default) |
+| `collections_ref` | the tag of this repo to pin, e.g. `v0.5.12` (the default) |
 
 All questions, with their defaults: [site-template.md](site-template.md#questions).
 

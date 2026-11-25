@@ -1,0 +1,14 @@
+---
+galaxy_info:
+  role_name: certbot
+  author: Packetflow
+  description: Let's Encrypt certificates with certbot (DNS-01 via Cloudflare), renewal timer, deploy hooks
+  company: Packetflow
+  license: Apache-2.0
+  min_ansible_version: "2.16"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - noble
+        - resolute
+dependencies: []

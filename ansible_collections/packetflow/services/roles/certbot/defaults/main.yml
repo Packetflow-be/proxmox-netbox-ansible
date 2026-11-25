@@ -1,0 +1,38 @@
+---
+# Let's Encrypt certificates with certbot, DNS-01 challenge through the
+# Cloudflare API. Works for names that only resolve internally: Let's Encrypt
+# only looks at the _acme-challenge TXT record in the public zone. Renewal is
+# certbot's own systemd timer; after every issuance or renewal a deploy hook
+# per certificate copies it where the service wants it and reloads that service.
+
+# Required: Let's Encrypt account e-mail (expiry warnings, account recovery).
+certbot_email: ""
+
+# Required, from the site's encrypted vars: a Cloudflare API token with
+# Zone > DNS > Edit on the zone(s) of the names below, nothing else.
+certbot_cloudflare_api_token: ""
+
+# Seconds to wait after creating the TXT record before Let's Encrypt checks it.
+certbot_propagation_seconds: 30
+
+# true = Let's Encrypt staging (untrusted certificates, generous rate limits):
+# use it to test a new setup. Switching back to false reissues from production.
+certbot_staging: false
+
+# ecdsa (P-256) or rsa.
+certbot_key_type: ecdsa
+
+# Certificates to obtain and keep renewed:
+#   - name: internal.example.com                # certbot's cert name (/etc/letsencrypt/live/<name>)
+#     domains: [internal.example.com, "*.internal.example.com"]
+#     # Optional deploy hook actions:
+#     pem: /etc/haproxy/certs/internal.example.com.pem   # fullchain + private key in one file (HAProxy)
+#     pem_owner: root                             # default root
+#     pem_group: root                             # default root
+#     pem_mode: "0600"                            # default 0600
+#     reload: [haproxy]                           # systemd units: try-reload-or-restart after a new cert
+# Changing `domains` reissues the certificate on the next run.
+certbot_certificates: []
+
+# Where the deploy hook scripts live (one per certificate).
+certbot_hook_dir: /usr/local/lib/packetflow-certbot

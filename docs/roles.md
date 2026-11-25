@@ -10,11 +10,11 @@ The same few rules show up in every role:
 
 | Principle | What it means in practice |
 |---|---|
-| **NetBox decides, the roles follow** | VMs, IPs, VLANs and monitoring status are changed in NetBox. The roles read it; nobody edits Proxmox or Zabbix by hand |
+| **NetBox decides, the roles follow** | VMs, IPs, VLANs, DNS records and monitoring status are changed in NetBox. The roles read it; nobody edits Proxmox, DNS or Zabbix by hand |
 | **Plan first** | `make plan` (vms), `CHECK=1` (Zabbix status), Ansible's `--check` everywhere. A plan error stops the run before the first change |
 | **Nothing is deleted automatically** | Orphaned VMs are reported, not removed. Zabbix hosts without a NetBox match are left alone |
 | **No secrets in defaults** | Tokens, PSKs and passwords default to `""`. The role refuses to run without them; sites keep them in sops-encrypted files |
-| **Least privilege** | Each token can do its job and nothing more: a read-only NetBox token for the VM plan, a Proxmox user with four ACLs |
+| **Least privilege** | Each token can do its job and nothing more: a read-only NetBox token for the VM plan, a Proxmox user with four ACLs, a Cloudflare token for DNS edits on one zone |
 | **Nothing is rebooted for you** | `make vms` never reboots a VM: CPU, memory and cloud-init changes wait for the next reboot, and the plan says so |
 
 ## packetflow.proxmox
@@ -58,6 +58,45 @@ keys, empty machine-id). [README](../ansible_collections/packetflow/proxmox/role
 | `template_zabbix_agent: true` | The agent is in the image, so a new VM is monitored from its first boot, before any playbook runs |
 | `template_force: false` | Rebuilding replaces only something that *is* a template with that name. Any other VM at that ID is refused |
 | `template_test_user: ""` | A console password for test templates only: refused unless the name ends in `-test`, so it can't end up in a site template |
+
+## packetflow.services
+
+### powerdns: internal DNS from NetBox
+
+One host is both the resolver for clients (pdns-recursor on :53) and the
+authoritative server for the internal zones (pdns with SQLite, on localhost).
+The zones' content comes from NetBox DNS.
+[README](../ansible_collections/packetflow/services/roles/powerdns/README.md)
+
+| Default | Why |
+|---|---|
+| octoDNS timer, `*:0/5` | Every 5 minutes octoDNS copies NetBox DNS into the local authoritative server. If NetBox is down, the last copy keeps being served |
+| octoDNS's 30 % guard | A run that would delete or change more than 30 % of a zone (10+ records) is refused. A zone deleted in NetBox by mistake shows up as a failing timer and the zone keeps its records |
+| pinned octoDNS versions | The sync is the one moving part, so it only changes when the pins change |
+| recursor not on `0.0.0.0` | systemd-resolved holds `127.0.0.53:53`; the recursor listens on the host's own addresses |
+| `allow_from`: private ranges | It's an internal resolver; it doesn't answer the internet |
+| `powerdns_recursor_dnssec: validate` | Public answers are validated; the internal zones get a negative trust anchor, because private zones can't validate against the public tree |
+| `powerdns_recursor_forwarders: []` | Resolves from the root by default; set forwarders to send public lookups to a resolver of your choice |
+
+### haproxy and certbot
+
+HAProxy terminates TLS for internal web UIs, routing by host name. certbot
+gets the certificates.
+[haproxy](../ansible_collections/packetflow/services/roles/haproxy/README.md) ·
+[certbot](../ansible_collections/packetflow/services/roles/certbot/README.md)
+
+| Default | Why |
+|---|---|
+| routing by Host header via a map file | One list (`haproxy_services`) says which name goes to which backend; `:80` redirects to HTTPS |
+| self-signed placeholder certificate | HAProxy can start before the first real certificate exists; certbot's deploy hook replaces it |
+| `haproxy_hsts: false` | Turn on only once every name has a valid certificate: browsers remember HSTS |
+| `haproxy_timeout_tunnel: 1h` | WebSockets (the Proxmox console) stay open after the upgrade |
+| backend `verify: false` | Backends are internal and usually have self-signed certificates; the client-facing side is the one that needs a trusted certificate |
+| stats on `127.0.0.1:8404` only | Backend health for whoever is on the box, and nobody else on the network |
+| certbot DNS-01 through Cloudflare | Let's Encrypt only checks a TXT record in the public zone, so internal-only names get trusted (wildcard) certificates too |
+| `certbot_cloudflare_api_token` | Scoped to Zone > DNS > Edit on the zones involved, nothing else |
+| `certbot_key_type: ecdsa` | Smaller and faster than RSA, and every current browser supports it |
+| `certbot_staging: false` | Switch to staging to test a new setup without hitting Let's Encrypt's rate limits |
 
 ## packetflow.zabbix
 
