@@ -107,9 +107,12 @@ are cloned from that cluster's template and go into this site's pool.
 - The baseline (`20-baseline.yml`) runs on every VM except those tagged
   `unmanaged`: your own OS baseline roles and `packetflow.zabbix.agent`
   (already in the template; this keeps running VMs in line).
-- Services (`30-services.yml`): one play per NetBox role or tag. Add a play
-  that targets the group and lists the role; from then on, giving a VM that
-  service is a tag in NetBox and `make ansible`.
+- Services (`30-services.yml`): one play per NetBox role or tag. Two are
+  there already: the tag `powerdns` (internal DNS, zones synced from NetBox
+  DNS) and the tag `haproxy` (reverse proxy with a Let's Encrypt
+  certificate); their variables go in `inventory/host_vars/<host>/`. For your
+  own services, add a play that targets the group and lists the role; from
+  then on, giving a VM that service is a tag in NetBox and `make ansible`.
 - Hosts outside the baseline get the Zabbix agent through the NetBox tag
   `zabbix_agent` (Ubuntu or Debian).
 - The community.sops vars plugin decrypts `*.sops.yml` in group_vars.

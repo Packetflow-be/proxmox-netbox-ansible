@@ -4,9 +4,9 @@
 VM in NetBox (name, cluster, vCPUs, memory, disk, VLAN, IP, platform), run
 `make plan` to see what would change, and `make vms` to clone, configure,
 resize, start or stop it. `make ansible` then configures it: the VM's **role
-and tags in NetBox decide which services it gets**. Monitoring follows along:
-the Zabbix agent is in the template, and a VM you set to offline in NetBox
-stops alerting.
+and tags in NetBox decide which services it gets**. Monitoring and DNS follow
+along: the Zabbix agent is in the template, a VM you set to offline in NetBox
+stops alerting, and its DNS records come from the same NetBox data.
 
 Nobody clicks a VM together in the Proxmox UI, and NetBox can't drift from
 what runs, because it is what the VMs are built from.
@@ -41,6 +41,7 @@ flowchart LR
   end
 
   zbx["Zabbix"]
+  dns["PowerDNS"]
 
   you -- "add or change a VM" --> nb
   nb -- "VMs of the site" --> vmscmd
@@ -51,6 +52,7 @@ flowchart LR
   anscmd -- "SSH: baseline and services" --> vm
   vm -- "agent registers itself" --> zbx
   zbxcmd -- "API: enable or disable hosts" --> zbx
+  nb -- "DNS zones, every 5 min" --> dns
 ```
 
 NetBox is only ever read. The automation host holds a **site repo**: a small
@@ -66,6 +68,7 @@ at a tag.
 | 3 | `make vms` | applies the plan through the Proxmox API |
 | 4 | `make ansible` | configures the VMs over SSH, by NetBox role and tag |
 | On a timer | `make zabbix-status` | disables or enables Zabbix hosts to match the NetBox status |
+| On a timer | (on the DNS VM) | octoDNS copies the zones from NetBox DNS into PowerDNS |
 
 ### Once: the template
 
@@ -210,6 +213,13 @@ flowchart LR
 
 ```yaml
 # playbooks/30-services.yml in a site repo
+- name: Reverse proxy
+  hosts: haproxy            # every VM with the NetBox tag `haproxy`
+  become: true
+  roles:
+    - packetflow.services.certbot
+    - packetflow.services.haproxy
+
 - name: Webservers
   hosts: webserver          # every VM with the NetBox role `webserver`
   become: true
@@ -218,8 +228,15 @@ flowchart LR
 ```
 
 Giving a VM a service is a role or a tag in NetBox and `make ansible`. A new
-kind of service is one play. This repo brings the mechanism and the Zabbix
-agent; the service roles are yours (or Galaxy's).
+kind of service is one play. Three service roles come with this repo, in
+[`packetflow.services`](ansible_collections/packetflow/services/README.md):
+
+| NetBox tag | Role | What the VM becomes |
+|---|---|---|
+| `powerdns` | `powerdns` | the internal DNS server, with its zones synced from NetBox (step 6) |
+| `haproxy` | `certbot`, then `haproxy` | a reverse proxy that terminates TLS with a Let's Encrypt certificate, also for names that only exist internally |
+
+Everything else is a role of your own or from Galaxy.
 
 ### 5. Monitoring follows NetBox
 
@@ -243,10 +260,28 @@ Persistent=true
 Details: [`roles/host_status`](ansible_collections/packetflow/zabbix/roles/host_status/README.md)
 and [`roles/agent`](ansible_collections/packetflow/zabbix/roles/agent/README.md).
 
+### 6. DNS follows NetBox
+
+A VM tagged `powerdns` runs PowerDNS as resolver and authoritative server for
+your internal zones. The zones themselves live in NetBox, in the
+[netbox-dns](https://github.com/peteeckel/netbox-plugin-dns) plugin, which can
+create the A and PTR records from the DNS names on IP addresses. So a VM you
+add in NetBox has its records without anyone editing a zone.
+
+On the DNS VM a systemd timer runs octoDNS every 5 minutes: it reads the zones
+from NetBox DNS and writes the difference to PowerDNS.
+
+- **NetBox down:** the sync fails and the last copy keeps being served.
+- **A zone emptied by mistake:** octoDNS refuses a run that would change or
+  delete more than 30 % of a zone. The timer fails and DNS keeps answering.
+
+Details: [`roles/powerdns`](ansible_collections/packetflow/services/roles/powerdns/README.md).
+
 ## Getting started
 
 You need a Proxmox VE node (8 or 9), a NetBox (4.x) and, for the monitoring
-part, a Zabbix server (7.x). **[docs/setup.md](docs/setup.md)** goes from a
+part, a Zabbix server (7.x). The DNS part needs the netbox-dns plugin in your
+NetBox. **[docs/setup.md](docs/setup.md)** goes from a
 fresh machine to the first VM, in order. In short:
 
 ```bash
@@ -272,6 +307,7 @@ make ansible
 |---|---|
 | [`ansible_collections/packetflow/proxmox`](ansible_collections/packetflow/proxmox/README.md) | roles `template` (cloud image → Proxmox template) and `vms` (NetBox → Proxmox: plan, then apply), and the `vm_plan` filter that holds the plan logic |
 | [`ansible_collections/packetflow/zabbix`](ansible_collections/packetflow/zabbix/README.md) | roles `agent` (baked into the template, kept in line afterwards) and `host_status` (NetBox status → Zabbix) |
+| [`ansible_collections/packetflow/services`](ansible_collections/packetflow/services/README.md) | roles `powerdns` (internal DNS, zones synced from NetBox DNS), `haproxy` and `certbot` (reverse proxy with Let's Encrypt certificates) |
 | [`site-template/`](docs/site-template.md), `copier.yml` | the Copier template for a site repo: inventory from NetBox, playbooks, Makefile, sops secrets, CI |
 | `scripts/` | `netbox-seed.py` (the NetBox objects the automation expects), `bootstrap-wsl.sh` (`make setup`), `release.sh` ([scripts/README.md](scripts/README.md)) |
 | `docs/` | [`setup.md`](docs/setup.md): fresh machine → first VM; [`operations.md`](docs/operations.md): day to day in NetBox; [`templates.md`](docs/templates.md): templates and other distros; [`site-template.md`](docs/site-template.md): the site repo and its questions; [`roles.md`](docs/roles.md): defaults and the reasoning behind them |

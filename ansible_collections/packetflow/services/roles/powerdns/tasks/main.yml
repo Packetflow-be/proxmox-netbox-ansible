@@ -1,0 +1,167 @@
+---
+- name: Check settings
+  ansible.builtin.assert:
+    that:
+      - powerdns_zones | length > 0
+      - powerdns_api_key | length >= 32
+      - powerdns_netbox_url is match('^https?://')
+      - powerdns_netbox_token | length > 0
+    fail_msg: >-
+      Set powerdns_zones (zones in NetBox DNS), powerdns_netbox_url, and from the
+      site's encrypted vars powerdns_api_key (32+ chars) and powerdns_netbox_token.
+    quiet: true
+
+- name: Packages
+  ansible.builtin.apt:
+    name: [pdns-server, pdns-backend-sqlite3, pdns-recursor, sqlite3, python3-venv, bind9-dnsutils]
+    update_cache: true
+    cache_valid_time: 3600
+  become: true
+
+# Authoritative server
+- name: Schema file of the SQLite backend
+  ansible.builtin.shell:
+    cmd: set -o pipefail; dpkg -L pdns-backend-sqlite3 | grep -m1 '/schema\.sqlite3\.sql$'
+    executable: /bin/bash
+  register: powerdns_schema
+  changed_when: false
+
+- name: Database
+  ansible.builtin.shell:
+    cmd: >-
+      sqlite3 {{ powerdns_db }} < {{ powerdns_schema.stdout }}
+      && chown pdns:pdns {{ powerdns_db }} && chmod 0640 {{ powerdns_db }}
+    creates: "{{ powerdns_db }}"
+  become: true
+
+# This pdns.conf has no include-dir; the package's bind backend snippet goes.
+- name: No packaged backend snippets
+  ansible.builtin.file:
+    path: /etc/powerdns/pdns.d/bind.conf
+    state: absent
+  notify: Restart pdns
+  become: true
+
+- name: Write pdns.conf
+  ansible.builtin.template:
+    src: pdns.conf.j2
+    dest: /etc/powerdns/pdns.conf
+    owner: root
+    group: pdns
+    mode: "0640"
+  notify: Restart pdns
+  become: true
+
+# Recursor 5.x reads recursor.yml when it exists, recursor.conf otherwise.
+- name: Write recursor.yml
+  ansible.builtin.template:
+    src: recursor.yml.j2
+    dest: /etc/powerdns/recursor.yml
+    mode: "0644"
+  notify: Restart pdns-recursor
+  become: true
+
+- name: Pdns and pdns-recursor enabled and running
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+  loop: [pdns, pdns-recursor]
+  become: true
+
+- name: Apply restarts now
+  ansible.builtin.meta: flush_handlers
+
+# octoDNS
+- name: System user octodns
+  ansible.builtin.user:
+    name: octodns
+    system: true
+    create_home: false
+    shell: /usr/sbin/nologin
+  become: true
+
+- name: OctoDNS venv
+  ansible.builtin.pip:
+    name: "{{ powerdns_octodns_packages }}"
+    virtualenv: "{{ powerdns_octodns_dir }}"
+    virtualenv_command: python3 -m venv
+  register: powerdns_octodns_venv
+  become: true
+
+- name: OctoDNS directory
+  ansible.builtin.file:
+    path: /etc/octodns
+    state: directory
+    owner: root
+    group: octodns
+    mode: "0750"
+  become: true
+
+- name: OctoDNS configuration
+  ansible.builtin.template:
+    src: octodns.yaml.j2
+    dest: /etc/octodns/config.yaml
+    owner: root
+    group: octodns
+    mode: "0640"
+  register: powerdns_octodns_config
+  become: true
+
+- name: OctoDNS tokens
+  ansible.builtin.copy:
+    content: |
+      NETBOX_TOKEN={{ powerdns_netbox_token }}
+      POWERDNS_API_KEY={{ powerdns_api_key }}
+    dest: /etc/octodns/env
+    owner: root
+    group: octodns
+    mode: "0640"
+  register: powerdns_octodns_env
+  no_log: true
+  become: true
+
+- name: Sync service and timer
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    mode: "0644"
+  loop: [octodns-sync.service, octodns-sync.timer]
+  register: powerdns_units
+  become: true
+
+- name: Sync timer enabled
+  ansible.builtin.systemd_service:
+    name: octodns-sync.timer
+    state: started
+    enabled: true
+    daemon_reload: "{{ powerdns_units is changed }}"
+  become: true
+
+- name: Zones in the authoritative server
+  ansible.builtin.command:
+    cmd: pdnsutil list-all-zones
+  register: powerdns_auth_zones
+  changed_when: false
+  check_mode: false  # read-only; else --check thinks every zone is missing
+  become: true
+
+# Now, not at the next timer tick: after a change, or while a zone is missing.
+- name: Sync now
+  ansible.builtin.systemd_service:
+    name: octodns-sync.service
+    state: started
+  when: >-
+    powerdns_octodns_venv is changed or powerdns_octodns_config is changed
+    or powerdns_octodns_env is changed or powerdns_units is changed
+    or powerdns_zones | difference(powerdns_auth_zones.stdout_lines) | length > 0
+  become: true
+
+- name: Every zone is served
+  ansible.builtin.command:
+    cmd: "dig +short +norecurse @127.0.0.1 -p {{ powerdns_auth_port }} {{ item }} SOA"
+  loop: "{{ powerdns_zones }}"
+  register: powerdns_soa
+  changed_when: false
+  check_mode: false
+  failed_when: powerdns_soa.stdout | length == 0

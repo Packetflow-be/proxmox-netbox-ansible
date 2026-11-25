@@ -1,0 +1,14 @@
+---
+galaxy_info:
+  role_name: haproxy
+  author: Packetflow
+  description: HAProxy reverse proxy with TLS termination, services (host name -> backend) from YAML
+  company: Packetflow
+  license: Apache-2.0
+  min_ansible_version: "2.16"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - noble
+        - resolute
+dependencies: []

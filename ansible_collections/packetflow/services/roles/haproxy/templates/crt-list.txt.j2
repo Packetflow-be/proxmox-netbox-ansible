@@ -1,0 +1,5 @@
+# {{ ansible_managed }}
+# First = default certificate. From haproxy_certificates.
+{% for crt in haproxy_certificates %}
+{{ crt }}
+{% endfor %}

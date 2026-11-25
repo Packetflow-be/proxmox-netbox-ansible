@@ -1,0 +1,7 @@
+---
+# Seamless: the master process starts new workers, old ones finish their connections.
+- name: Reload haproxy
+  ansible.builtin.systemd_service:
+    name: haproxy
+    state: reloaded
+  become: true

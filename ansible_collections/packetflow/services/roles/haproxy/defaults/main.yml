@@ -1,0 +1,43 @@
+---
+# HAProxy as a TLS-terminating reverse proxy, configured from a list of
+# services: one host name (or several) -> one backend. Requests are routed by
+# their Host header through a map file; :80 redirects to https.
+
+# Certificates HAProxy serves, as combined PEM files (fullchain + key). The
+# first is the default (clients without SNI, unknown names); for the others
+# HAProxy picks by SNI. A missing file gets a self-signed placeholder so
+# HAProxy can start; packetflow.services.certbot's deploy hook replaces it.
+haproxy_certificates:
+  - /etc/haproxy/certs/{{ ansible_facts['fqdn'] }}.pem
+
+# Services:
+#   - name: netbox                          # backend name: [a-z0-9_-]
+#     hosts: [netbox.internal.example.com]
+#     servers: ["10.0.30.13:443"]           # host:port, one or more (round robin)
+#     ssl: true                             # HTTPS to the backend (default false)
+#     verify: false                         # check the backend's certificate against the system CAs (default false)
+#     check: true                           # health checks (default true): TCP connect, or HTTP with check_path
+#     check_path: /login/                   # optional: HTTP GET, expect 2xx/3xx
+#     server_options: ""                    # optional: appended to every server line
+#     options: []                           # optional: extra backend lines (http-request ..., timeout server 5m, ...)
+haproxy_services: []
+
+haproxy_bind: "*"
+# Strict-Transport-Security on every response; only once all names have a valid certificate.
+haproxy_hsts: false
+haproxy_timeout_connect: 5s
+haproxy_timeout_client: 60s
+haproxy_timeout_server: 60s
+# WebSockets (Proxmox console, ...) after the upgrade.
+haproxy_timeout_tunnel: 1h
+
+# Local stats page with the backends' health (http://127.0.0.1:8404/); "" = off.
+haproxy_stats_bind: "127.0.0.1:8404"
+
+# Extra lines for the global and defaults sections.
+haproxy_global_extra: []
+haproxy_defaults_extra: []
+
+haproxy_cert_dir: /etc/haproxy/certs
+# Self-signed placeholder lifetime; it's meant to be replaced.
+haproxy_placeholder_days: 30

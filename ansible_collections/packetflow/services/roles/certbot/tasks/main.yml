@@ -1,0 +1,113 @@
+---
+- name: Check settings
+  ansible.builtin.assert:
+    that:
+      - certbot_email is search('@')
+      - certbot_cloudflare_api_token | length > 0
+      - certbot_key_type in ['ecdsa', 'rsa']
+      - certbot_certificates | map(attribute='name', default='') | select | list | length == certbot_certificates | length
+      - certbot_certificates | map(attribute='name') | unique | list | length == certbot_certificates | length
+      - certbot_certificates | map(attribute='domains', default=[]) | map('length') | select('equalto', 0) | list | length == 0
+    fail_msg: >-
+      Set certbot_email and certbot_cloudflare_api_token (site's encrypted vars, a token with
+      Zone > DNS > Edit), and give every entry of certbot_certificates a unique name and domains.
+    quiet: true
+
+- name: Packages
+  ansible.builtin.apt:
+    name: [certbot, python3-certbot-dns-cloudflare]
+    update_cache: true
+    cache_valid_time: 3600
+  become: true
+
+- name: Cloudflare credentials
+  ansible.builtin.template:
+    src: cloudflare.ini.j2
+    dest: /etc/letsencrypt/cloudflare.ini
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  become: true
+
+- name: Hook directory
+  ansible.builtin.file:
+    path: "{{ certbot_hook_dir }}"
+    state: directory
+    mode: "0755"
+  become: true
+
+# Fixed path per certificate, stored in its renewal config at issuance: editing
+# the script here changes what later renewals do without reissuing.
+- name: Deploy hooks
+  ansible.builtin.template:
+    src: deploy-hook.sh.j2
+    dest: "{{ certbot_hook_dir }}/deploy-{{ item.name }}.sh"
+    mode: "0755"
+  loop: "{{ certbot_certificates }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: certbot_hooks
+  become: true
+
+- name: Current certificates
+  ansible.builtin.command:
+    argv: [certbot, certificates, --cert-name, "{{ item.name }}"]
+  loop: "{{ certbot_certificates }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: certbot_current
+  changed_when: false
+  become: true
+
+# Issue when the certificate is missing, its names differ, or it comes from
+# the other Let's Encrypt environment (staging shows up as TEST_CERT).
+- name: Obtain certificates
+  vars:
+    certbot_out: "{{ certbot_current.results[idx].stdout }}"
+    certbot_exists: "{{ 'Certificate Name:' in certbot_out }}"
+    certbot_is_test: "{{ 'TEST_CERT' in certbot_out }}"
+    certbot_have_domains: "{{ (certbot_out | regex_search('Domains: ([^\\n]*)', '\\1') or ['']) | first | split | sort }}"
+    certbot_env_switch: "{{ certbot_exists | bool and (certbot_is_test | bool) != (certbot_staging | bool) }}"
+  ansible.builtin.command:
+    argv: "{{ ['certbot', 'certonly', '--non-interactive', '--agree-tos', '--email', certbot_email,
+              '--dns-cloudflare', '--dns-cloudflare-credentials', '/etc/letsencrypt/cloudflare.ini',
+              '--dns-cloudflare-propagation-seconds', certbot_propagation_seconds | string,
+              '--key-type', certbot_key_type, '--cert-name', item.name,
+              '--deploy-hook', certbot_hook_dir ~ '/deploy-' ~ item.name ~ '.sh',
+              '--domains', item.domains | join(',')]
+              + (['--test-cert'] if certbot_staging | bool else [])
+              + (['--force-renewal'] if certbot_env_switch | bool else [])
+              + (['--break-my-certs'] if certbot_env_switch | bool and certbot_staging | bool else []) }}"
+  when: >-
+    not certbot_exists | bool
+    or certbot_have_domains != item.domains | sort
+    or certbot_env_switch | bool
+  loop: "{{ certbot_certificates }}"
+  loop_control:
+    index_var: idx
+    label: "{{ item.name }}"
+  register: certbot_issue
+  changed_when: true
+  become: true
+
+# certbot already ran the hook for anything it just issued.
+- name: Run changed deploy hooks for existing certificates
+  ansible.builtin.command:
+    cmd: "{{ certbot_hook_dir }}/deploy-{{ item.name }}.sh"
+  when:
+    - certbot_hooks.results[idx] is changed
+    - certbot_issue.results[idx] is skipped
+  loop: "{{ certbot_certificates }}"
+  loop_control:
+    index_var: idx
+    label: "{{ item.name }}"
+  changed_when: true
+  become: true
+
+- name: Renewal timer enabled
+  ansible.builtin.systemd_service:
+    name: certbot.timer
+    state: started
+    enabled: true
+  become: true

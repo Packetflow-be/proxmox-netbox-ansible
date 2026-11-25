@@ -1,0 +1,7 @@
+# {{ ansible_managed }}
+# Host header (lowercase, without port) -> backend. From haproxy_services.
+{% for svc in haproxy_services %}
+{% for host in svc.hosts %}
+{{ host | lower }} {{ svc.name }}
+{% endfor %}
+{% endfor %}
